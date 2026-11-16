@@ -1,0 +1,84 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Build Redmine httpd vhost configuration
+  vars:
+    _redmine_http_redirect_rule: >-
+      {{
+        (redmine_https_port | int == 443) | ternary(
+          'RewriteRule ^(.*)$ https://%{HTTP_HOST}$1 [R=301,L]',
+          'RewriteRule ^(.*)$ https://' ~ redmine_server_name ~ ':' ~ (redmine_https_port | string) ~ '$1 [R=301,L]'
+        )
+      }}
+    _redmine_http_options_ssl:
+      - "RewriteEngine On"
+      - "{{ _redmine_http_redirect_rule }}"
+    _redmine_proxy_options:
+      - "ProxyPreserveHost On"
+      - "ProxyRequests Off"
+      - "ProxyPass / http://{{ redmine_app_bind_address }}:{{ redmine_app_port }}/"
+      - "ProxyPassReverse / http://{{ redmine_app_bind_address }}:{{ redmine_app_port }}/"
+    _redmine_vhosts_ssl:
+      - name: "{{ redmine_http_vhost_name }}"
+        port: "{{ redmine_http_port | int }}"
+        server_name: "{{ redmine_server_name }}"
+        ssl: false
+        options: "{{ _redmine_http_options_ssl }}"
+      - name: "{{ redmine_ssl_vhost_name }}"
+        port: "{{ redmine_https_port | int }}"
+        server_name: "{{ redmine_server_name }}"
+        ssl: "{{ _redmine_httpd_vhost_ssl }}"
+        headers:
+          - 'RequestHeader set X-Forwarded-Proto "https"'
+          - 'RequestHeader set X-Forwarded-Ssl "on"'
+        options: "{{ _redmine_proxy_options }}"
+    _redmine_vhosts_plain:
+      - name: "{{ redmine_http_vhost_name }}"
+        port: "{{ redmine_http_port | int }}"
+        server_name: "{{ redmine_server_name }}"
+        ssl: false
+        options: "{{ _redmine_proxy_options }}"
+  ansible.builtin.set_fact:
+    _redmine_computed_httpd_vhosts: >-
+      {{
+        ((redmine_ssl | bool) | ternary(_redmine_vhosts_ssl, _redmine_vhosts_plain))
+        + redmine_httpd_extra_vhosts
+      }}
+
+- name: Check if Let's Encrypt certificate already exists
+  ansible.builtin.stat:
+    path: "{{ redmine_ssl_letsencrypt_config_path }}/{{ redmine_ssl_letsencrypt_domains | first }}/fullchain.pem"
+  register: _redmine_le_cert_stat
+  when: _redmine_using_letsencrypt | bool
+
+- name: Configure Apache httpd using httpd role
+  ansible.builtin.include_role:
+    name: httpd
+    apply:
+      tags:
+        - redmine-httpd
+        - redmine-config
+  vars:
+    _httpd_redmine_skip_pki_for_le: "{{ (_redmine_using_letsencrypt | bool) and (_redmine_le_cert_stat.stat.exists | default(false)) }}"
+    httpd_server_name: "{{ redmine_server_name }}"
+    httpd_vhosts: "{{ _redmine_computed_httpd_vhosts }}"
+    httpd_extra_modules: "{{ _redmine_httpd_extra_modules }}"
+    httpd_pki_create_ca: "{{ (redmine_ssl | bool) and not (_redmine_using_user_certs | bool) and not (_httpd_redmine_skip_pki_for_le | bool) }}"
+    httpd_pki_install_certificates: "{{ (_httpd_redmine_skip_pki_for_le | bool) | ternary([], _httpd_pki_install_certificates_vhosts) }}"
+
+- name: Include Let's Encrypt certbot tasks
+  ansible.builtin.include_tasks:
+    file: redmine_ssl_letsencrypt.yml
+  when: _redmine_using_letsencrypt | bool

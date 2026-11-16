@@ -1,0 +1,8 @@
+---
+redmine_server_name: external.openstack.local
+redmine_ssl: true
+redmine_ssl_letsencrypt_enable: true
+redmine_ssl_letsencrypt_email: "test@example.com"
+redmine_ssl_letsencrypt_certbot_server: "https://127.0.0.1:8889/acme/acme-osa/directory"
+redmine_ssl_letsencrypt_domains:
+  - "external.openstack.local"

@@ -1,0 +1,213 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Ensure Bundler config directory exists
+  ansible.builtin.file:
+    path: "{{ _redmine_release_path }}/.bundle"
+    state: directory
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0755"
+
+- name: Write Bundler local configuration
+  ansible.builtin.copy:
+    content: |
+      ---
+      BUNDLE_PATH: "{{ redmine_shared_dir }}/bundle"
+      BUNDLE_WITHOUT: "{{ redmine_bundle_without | join(':') }}"
+      BUNDLE_JOBS: "{{ redmine_bundle_jobs }}"
+    dest: "{{ _redmine_release_path }}/.bundle/config"
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0644"
+
+- name: Check whether Bundler dependencies are satisfied
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle check"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  register: _redmine_bundle_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Redmine Ruby gems via Bundler
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle install"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  register: _redmine_bundle_install
+  changed_when: true
+  when: _redmine_bundle_check.rc != 0
+  notify:
+    - Restart redmine
+
+- name: Generate secret token on fresh installation
+  when: not _redmine_shared_secret_stat.stat.exists
+  block:
+    - name: Run rake generate_secret_token
+      ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake generate_secret_token"
+      args:
+        chdir: "{{ _redmine_release_path }}"
+      become: true
+      become_user: "{{ redmine_system_user_name }}"
+      environment:
+        RAILS_ENV: "{{ redmine_rails_env }}"
+        PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      changed_when: true
+
+    - name: Copy generated secret_token.rb to shared config
+      ansible.builtin.copy:
+        src: "{{ _redmine_release_path }}/config/initializers/secret_token.rb"
+        dest: "{{ redmine_shared_dir }}/config/secret_token.rb"
+        remote_src: true
+        owner: "{{ redmine_system_user_name }}"
+        group: "{{ redmine_system_group_name }}"
+        mode: "0600"
+
+    - name: Link shared secret_token.rb into release directory
+      ansible.builtin.file:
+        src: "{{ redmine_shared_dir }}/config/secret_token.rb"
+        dest: "{{ _redmine_release_path }}/config/initializers/secret_token.rb"
+        state: link
+        owner: "{{ redmine_system_user_name }}"
+        group: "{{ redmine_system_group_name }}"
+        force: true
+
+- name: Run Redmine database migrations
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake db:migrate"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  changed_when: true
+  when: _redmine_needs_db_migrate | bool
+  notify:
+    - Restart redmine
+
+- name: Load Redmine default configuration data
+  when:
+    - redmine_load_default_data | bool
+    - not (_redmine_default_data_loaded | bool)
+  block:
+    - name: Run rake redmine:load_default_data
+      ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake redmine:load_default_data"
+      args:
+        chdir: "{{ _redmine_release_path }}"
+      become: true
+      become_user: "{{ redmine_system_user_name }}"
+      environment:
+        RAILS_ENV: "{{ redmine_rails_env }}"
+        REDMINE_LANG: "{{ redmine_language }}"
+        PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      changed_when: true
+
+    - name: Record default data loaded in local facts
+      community.general.ini_file:
+        path: /etc/ansible/facts.d/redmine.fact
+        section: general
+        option: default_data_loaded
+        value: "true"
+        mode: "0644"
+
+- name: Run Redmine plugin migrations
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake redmine:plugins:migrate"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  changed_when: true
+  when:
+    - redmine_plugins | length > 0
+    - (_redmine_needs_db_migrate | bool) or (_redmine_plugins_changed | bool)
+  notify:
+    - Restart redmine
+
+- name: Clear Redmine cache on upgrade or plugin change
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake tmp:cache:clear"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  changed_when: true
+  when: (_redmine_is_upgrade | bool) or (_redmine_plugins_changed | bool)
+  notify:
+    - Restart redmine
+
+- name: Check current Redmine runtime symlink
+  ansible.builtin.stat:
+    path: "{{ redmine_runtime_directory }}"
+  register: _redmine_runtime_dir_stat
+
+- name: Trigger Redmine runtime symlink update when target differs
+  ansible.builtin.debug:
+    msg: "Updating Redmine runtime symlink {{ redmine_runtime_directory }} -> {{ _redmine_release_path }}"
+  changed_when: true
+  when: >-
+    (not _redmine_runtime_dir_stat.stat.exists)
+    or (not (_redmine_runtime_dir_stat.stat.islnk | default(false)))
+    or (_redmine_runtime_dir_stat.stat.lnk_source != _redmine_release_path)
+  notify:
+    - Update Redmine runtime symlink
+
+- name: Record installed Redmine version in local facts
+  community.general.ini_file:
+    path: /etc/ansible/facts.d/redmine.fact
+    section: general
+    option: version
+    value: "{{ _redmine_version }}"
+    mode: "0644"
+
+- name: Prune old Redmine releases beyond retention limit
+  when: redmine_keep_releases | int > 0
+  block:
+    - name: List existing Redmine release directories
+      ansible.builtin.find:
+        paths: "{{ redmine_releases_dir }}"
+        file_type: directory
+        depth: 1
+      register: _redmine_existing_releases
+
+    - name: Remove old Redmine releases beyond retention count
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: >-
+        {{
+          (
+            _redmine_existing_releases.files
+            | rejectattr('path', 'eq', _redmine_release_path)
+            | rejectattr('path', 'eq', _redmine_runtime_dir_stat.stat.lnk_source | default(''))
+            | sort(attribute='mtime', reverse=True)
+          )[(redmine_keep_releases | int - 1):]
+        }}
+      loop_control:
+        label: "{{ item.path }}"

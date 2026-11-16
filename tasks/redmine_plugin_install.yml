@@ -1,0 +1,359 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Remove Redmine plugin when state is absent
+  when: (_plugin.state | default('present')) == 'absent'
+  block:
+    - name: Ensure plugin directory is absent
+      ansible.builtin.file:
+        path: "{{ _plugin_dir }}"
+        state: absent
+      register: _plugin_removed
+      notify:
+        - Restart redmine
+
+    - name: Record plugin change on removal # noqa: no-handler
+      ansible.builtin.set_fact:
+        _redmine_plugins_changed: true
+      when: _plugin_removed is changed
+
+- name: Install or upgrade Redmine plugin
+  when: (_plugin.state | default('present')) == 'present'
+  block:
+    - name: Manage git-based Redmine plugin
+      when: _plugin.repo is defined
+      block:
+        - name: Clone or update Redmine plugin git repository
+          ansible.builtin.git:
+            repo: "{{ _plugin.repo }}"
+            dest: "{{ _plugin_dir }}"
+            version: "{{ _plugin.version | default('HEAD') }}"
+            force: true
+            update: true
+          become: true
+          become_user: "{{ redmine_system_user_name }}"
+          register: _plugin_git_result
+          notify:
+            - Restart redmine
+
+        - name: Record plugin change for git repository # noqa: no-handler
+          ansible.builtin.set_fact:
+            _redmine_plugins_changed: true
+          when: _plugin_git_result is changed
+
+    - name: Manage remote archive Redmine plugin
+      when:
+        - _plugin.repo is not defined
+        - _plugin.url is defined
+      vars:
+        _plugin_archive_dest: >-
+          {{
+            redmine_shared_dir ~ '/plugins_cache/'
+            ~ _plugin.name ~ '-' ~ (_plugin.url | hash('sha1'))[:8]
+            ~ '-' ~ (_plugin.url | basename)
+          }}
+        _plugin_expected_meta: >-
+          {{
+            {
+              'url': _plugin.url,
+              'version': _plugin.version | default(''),
+              'sub_dir': _plugin.sub_dir | default('')
+            } | to_json
+          }}
+      block:
+        - name: Download Redmine plugin archive
+          ansible.builtin.get_url:
+            url: "{{ _plugin.url }}"
+            dest: "{{ _plugin_archive_dest }}"
+            checksum: "{{ _plugin.checksum | default(omit) }}"
+            mode: "0644"
+            validate_certs: "{{ redmine_download_validate_certs }}"
+          register: _plugin_url_dl
+          until: _plugin_url_dl is success
+          retries: 3
+          delay: 5
+
+        - name: Stat plugin directory and metadata marker
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ _plugin_dir }}"
+            - "{{ _plugin_dir }}/.ansible_plugin_meta"
+          register: _plugin_url_stats
+
+        - name: Read existing plugin metadata marker
+          ansible.builtin.slurp:
+            src: "{{ _plugin_dir }}/.ansible_plugin_meta"
+          register: _plugin_url_meta_slurp
+          when: _plugin_url_stats.results[1].stat.exists
+
+        - name: Extract and install remote archive plugin
+          when: _plugin_needs_extract | bool
+          vars:
+            _plugin_needs_extract: >-
+              {{
+                (not _plugin_url_stats.results[0].stat.exists)
+                or (_plugin_url_dl is changed)
+                or (not _plugin_url_stats.results[1].stat.exists)
+                or ((_plugin_url_meta_slurp.content | b64decode | trim) != (_plugin_expected_meta | trim))
+              }}
+            _plugin_extract_tmp: "{{ redmine_shared_dir }}/plugins_cache/_extract_{{ _plugin.name }}"
+          block:
+            - name: Clean temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _plugin_extract_tmp }}"
+                state: absent
+
+            - name: Create temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _plugin_extract_tmp }}"
+                state: directory
+                mode: "0755"
+
+            - name: Unpack remote plugin archive
+              ansible.builtin.unarchive:
+                src: "{{ _plugin_archive_dest }}"
+                dest: "{{ _plugin_extract_tmp }}"
+                remote_src: true
+
+            - name: Check for init.rb at archive root
+              ansible.builtin.stat:
+                path: "{{ _plugin_extract_tmp }}/init.rb"
+              register: _plugin_root_init
+
+            - name: Find top-level directories in extracted archive
+              ansible.builtin.find:
+                paths: "{{ _plugin_extract_tmp }}"
+                file_type: directory
+                depth: 1
+              register: _plugin_top_dirs
+
+            - name: Remove existing plugin directory before replacement
+              ansible.builtin.file:
+                path: "{{ _plugin_dir }}"
+                state: absent
+
+            - name: Create target plugin directory
+              ansible.builtin.file:
+                path: "{{ _plugin_dir }}"
+                state: directory
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: "0755"
+
+            - name: Copy normalized plugin files into target directory
+              vars:
+                _plugin_resolved_root: >-
+                  {{
+                    (_plugin.sub_dir | default('') | length > 0) | ternary(
+                      _plugin_extract_tmp ~ '/' ~ (_plugin.sub_dir | default('')),
+                      (_plugin_root_init.stat.exists) | ternary(
+                        _plugin_extract_tmp,
+                        ((_plugin_top_dirs.files | length) == 1) | ternary(
+                          (_plugin_top_dirs.files | first | default({})).path | default(_plugin_extract_tmp),
+                          _plugin_extract_tmp
+                        )
+                      )
+                    )
+                  }}
+              ansible.builtin.copy:
+                src: "{{ _plugin_resolved_root }}/"
+                dest: "{{ _plugin_dir }}/"
+                remote_src: true
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: preserve
+              notify:
+                - Restart redmine
+
+            - name: Write plugin metadata marker
+              ansible.builtin.copy:
+                content: "{{ _plugin_expected_meta }}\n"
+                dest: "{{ _plugin_dir }}/.ansible_plugin_meta"
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: "0644"
+
+            - name: Remove temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _plugin_extract_tmp }}"
+                state: absent
+
+            - name: Record plugin change for remote archive
+              ansible.builtin.set_fact:
+                _redmine_plugins_changed: true
+
+    - name: Manage deploy-host Redmine plugin
+      when:
+        - _plugin.repo is not defined
+        - _plugin.url is not defined
+        - _plugin.src is defined
+      block:
+        - name: Handle deploy-host archive plugin
+          when: (_plugin.src | string) is match('.*\.(tar\.gz|tgz|tar\.bz2|tar\.xz|zip)$')
+          block:
+            - name: Copy plugin archive from deploy host
+              ansible.builtin.copy:
+                src: "{{ _plugin.src }}"
+                dest: "{{ redmine_shared_dir }}/plugins_cache/{{ _plugin.name }}_{{ _plugin.src | basename }}"
+                mode: "0644"
+              register: _plugin_src_archive
+
+            - name: Stat deploy-host archive plugin directory and marker
+              ansible.builtin.stat:
+                path: "{{ item }}"
+              loop:
+                - "{{ _plugin_dir }}"
+                - "{{ _plugin_dir }}/.ansible_plugin_meta"
+              register: _plugin_src_stats
+
+            - name: Read existing deploy-host archive plugin metadata marker
+              ansible.builtin.slurp:
+                src: "{{ _plugin_dir }}/.ansible_plugin_meta"
+              register: _plugin_src_meta_slurp
+              when: _plugin_src_stats.results[1].stat.exists
+
+            - name: Extract and install deploy-host archive plugin
+              when: _plugin_needs_extract | bool
+              vars:
+                _plugin_expected_meta: >-
+                  {{
+                    {
+                      'src': _plugin.src,
+                      'version': _plugin.version | default(''),
+                      'sub_dir': _plugin.sub_dir | default(''),
+                      'checksum': _plugin_src_archive.checksum | default('')
+                    } | to_json
+                  }}
+                _plugin_needs_extract: >-
+                  {{
+                    (not _plugin_src_stats.results[0].stat.exists)
+                    or (_plugin_src_archive is changed)
+                    or (not _plugin_src_stats.results[1].stat.exists)
+                    or ((_plugin_src_meta_slurp.content | b64decode | trim) != (_plugin_expected_meta | trim))
+                  }}
+                _plugin_extract_tmp: "{{ redmine_shared_dir }}/plugins_cache/_extract_{{ _plugin.name }}"
+              block:
+                - name: Clean temporary extraction path for deploy-host archive
+                  ansible.builtin.file:
+                    path: "{{ _plugin_extract_tmp }}"
+                    state: absent
+
+                - name: Create temporary extraction path for deploy-host archive
+                  ansible.builtin.file:
+                    path: "{{ _plugin_extract_tmp }}"
+                    state: directory
+                    mode: "0755"
+
+                - name: Unpack deploy-host plugin archive
+                  ansible.builtin.unarchive:
+                    src: "{{ _plugin_src_archive.dest }}"
+                    dest: "{{ _plugin_extract_tmp }}"
+                    remote_src: true
+
+                - name: Check for init.rb at deploy-host archive root
+                  ansible.builtin.stat:
+                    path: "{{ _plugin_extract_tmp }}/init.rb"
+                  register: _plugin_root_init
+
+                - name: Find top-level directories in deploy-host archive
+                  ansible.builtin.find:
+                    paths: "{{ _plugin_extract_tmp }}"
+                    file_type: directory
+                    depth: 1
+                  register: _plugin_top_dirs
+
+                - name: Remove existing plugin directory before replacement
+                  ansible.builtin.file:
+                    path: "{{ _plugin_dir }}"
+                    state: absent
+
+                - name: Create target plugin directory
+                  ansible.builtin.file:
+                    path: "{{ _plugin_dir }}"
+                    state: directory
+                    owner: "{{ redmine_system_user_name }}"
+                    group: "{{ redmine_system_group_name }}"
+                    mode: "0755"
+
+                - name: Copy normalized deploy-host archive files into target directory
+                  vars:
+                    _plugin_resolved_root: >-
+                      {{
+                        (_plugin.sub_dir | default('') | length > 0) | ternary(
+                          _plugin_extract_tmp ~ '/' ~ (_plugin.sub_dir | default('')),
+                          (_plugin_root_init.stat.exists) | ternary(
+                            _plugin_extract_tmp,
+                            ((_plugin_top_dirs.files | length) == 1) | ternary(
+                              (_plugin_top_dirs.files | first | default({})).path | default(_plugin_extract_tmp),
+                              _plugin_extract_tmp
+                            )
+                          )
+                        )
+                      }}
+                  ansible.builtin.copy:
+                    src: "{{ _plugin_resolved_root }}/"
+                    dest: "{{ _plugin_dir }}/"
+                    remote_src: true
+                    owner: "{{ redmine_system_user_name }}"
+                    group: "{{ redmine_system_group_name }}"
+                    mode: preserve
+                  notify:
+                    - Restart redmine
+
+                - name: Write deploy-host archive plugin metadata marker
+                  ansible.builtin.copy:
+                    content: "{{ _plugin_expected_meta }}\n"
+                    dest: "{{ _plugin_dir }}/.ansible_plugin_meta"
+                    owner: "{{ redmine_system_user_name }}"
+                    group: "{{ redmine_system_group_name }}"
+                    mode: "0644"
+
+                - name: Remove temporary extraction path for deploy-host archive
+                  ansible.builtin.file:
+                    path: "{{ _plugin_extract_tmp }}"
+                    state: absent
+
+                - name: Record plugin change for deploy-host archive
+                  ansible.builtin.set_fact:
+                    _redmine_plugins_changed: true
+
+        - name: Handle deploy-host directory plugin
+          when: (_plugin.src | string) is not match('.*\.(tar\.gz|tgz|tar\.bz2|tar\.xz|zip)$')
+          block:
+            - name: Ensure target plugin directory exists
+              ansible.builtin.file:
+                path: "{{ _plugin_dir }}"
+                state: directory
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: "0755"
+
+            - name: Copy plugin directory from deploy host
+              ansible.builtin.copy:
+                src: "{{ (_plugin.src | string).endswith('/') | ternary(_plugin.src, _plugin.src ~ '/') }}"
+                dest: "{{ _plugin_dir }}/"
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                directory_mode: "0755"
+                mode: preserve
+              register: _plugin_src_dir
+              notify:
+                - Restart redmine
+
+            - name: Record plugin change for deploy-host directory # noqa: no-handler
+              ansible.builtin.set_fact:
+                _redmine_plugins_changed: true
+              when: _plugin_src_dir is changed

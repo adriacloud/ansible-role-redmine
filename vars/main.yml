@@ -1,0 +1,108 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+_redmine_version: "{{ _redmine_resolved_version | default(redmine_version | string | trim) }}"
+_redmine_major_version: "{{ (_redmine_version | string).split('.')[0] }}"
+_redmine_release_path: "{{ redmine_install_dir }}"
+_redmine_installed_version: "{{ ansible_facts.get('ansible_local', {}).get('redmine', {}).get('general', {}).get('version', '') }}"
+_redmine_default_data_loaded: "{{ ansible_facts.get('ansible_local', {}).get('redmine', {}).get('general', {}).get('default_data_loaded', false) | bool }}"
+_redmine_is_upgrade: "{{ (_redmine_installed_version | length > 0) and (_redmine_installed_version != _redmine_version) }}"
+_redmine_needs_db_migrate: >-
+  {{
+    (_redmine_installed_version | length == 0)
+    or _redmine_is_upgrade
+    or (redmine_db_migrate_force | bool)
+    or (_redmine_db.get('migrate_force', false) | bool)
+  }}
+_redmine_using_user_certs: >-
+  {{
+    (redmine_user_ssl_cert is defined and redmine_user_ssl_cert | default('') | length > 0)
+    and (redmine_user_ssl_key is defined and redmine_user_ssl_key | default('') | length > 0)
+  }}
+_redmine_using_letsencrypt: >-
+  {{
+    (redmine_ssl | bool)
+    and (redmine_ssl_letsencrypt_enable | bool)
+    and not (_redmine_using_user_certs | bool)
+  }}
+_redmine_httpd_vhost_ssl_src: >-
+  {{
+    {}
+    | combine(
+      (redmine_user_ssl_cert is defined and redmine_user_ssl_cert | length > 0)
+      | ternary({'cert': redmine_user_ssl_cert | default('')}, {})
+    )
+    | combine(
+      (redmine_user_ssl_key is defined and redmine_user_ssl_key | length > 0)
+      | ternary({'key': redmine_user_ssl_key | default('')}, {})
+    )
+    | combine(
+      (redmine_user_ssl_ca_cert is defined and redmine_user_ssl_ca_cert | length > 0)
+      | ternary({'ca': redmine_user_ssl_ca_cert | default('')}, {})
+    )
+  }}
+_redmine_httpd_vhost_ssl: >-
+  {{
+    (redmine_ssl | bool) | ternary(
+      {'san': redmine_pki_san} | combine(_redmine_httpd_vhost_ssl_src),
+      false
+    )
+  }}
+_redmine_ruby_bin_dir: "{{ redmine_ruby_install_dir }}/bin"
+_redmine_ruby_runtime_bin_dir: "{{ redmine_ruby_runtime_dir }}/bin"
+_redmine_smtp_configuration: >-
+  {{
+    (redmine_smtp_settings | length > 0) | ternary(
+      {
+        'default': {
+          'email_delivery': {
+            'delivery_method': 'smtp',
+            'smtp_settings': redmine_smtp_settings
+          }
+        }
+      },
+      {}
+    )
+  }}
+_redmine_configuration: >-
+  {{
+    {'default': {}}
+    | combine(_redmine_smtp_configuration, recursive=True)
+    | combine(redmine_configuration, recursive=True)
+  }}
+_redmine_db_defaults:
+  adapter: mysql2
+  host: localhost
+  port: 3306
+  database: "{{ redmine_db.get('name', 'redmine') }}"
+  username: redmine
+  password: "changeme"
+  encoding: "{{ (redmine_db.get('adapter', 'mysql2') in ['mysql2', 'trilogy']) | ternary('utf8mb4', 'utf8') }}"
+  variables: {}
+_redmine_db: "{{ _redmine_db_defaults | combine(redmine_db, recursive=True) }}"
+_redmine_db_configuration: >-
+  {{
+    {
+      redmine_rails_env: (
+        (_redmine_db['adapter'] == 'sqlite3') | ternary(
+          {
+            'adapter': 'sqlite3',
+            'database': _redmine_db['database']
+          },
+          _redmine_db | dict2items | rejectattr('key', 'in', ['name', 'migrate_force']) | items2dict
+        )
+      )
+    }
+  }}

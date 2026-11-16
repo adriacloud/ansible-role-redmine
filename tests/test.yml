@@ -1,0 +1,10 @@
+---
+- name: Gather facts from infra database node
+  hosts: infra
+  gather_facts: true
+  tasks: []
+
+- name: Installing Redmine
+  hosts: redmine
+  roles:
+    - role: redmine

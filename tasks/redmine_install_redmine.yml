@@ -1,0 +1,86 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Download Redmine release tarball
+  ansible.builtin.get_url:
+    url: "{{ redmine_download_url }}"
+    dest: "{{ redmine_cache_dir }}/redmine-{{ _redmine_version }}.tar.gz"
+    checksum: "{{ (redmine_verify_checksum | bool) | ternary('sha256:' ~ redmine_download_checksum_url, omit) }}"
+    mode: "0644"
+    validate_certs: "{{ redmine_download_validate_certs }}"
+  register: _redmine_tarball_dl
+  until: _redmine_tarball_dl is success
+  retries: 3
+  delay: 5
+
+- name: Unpack Redmine source tarball
+  ansible.builtin.unarchive:
+    src: "{{ _redmine_tarball_dl.dest }}"
+    dest: "{{ redmine_install_dir }}"
+    remote_src: true
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    creates: "{{ redmine_install_dir }}/lib/redmine/version.rb"
+    extra_opts:
+      - --strip-components=1
+  notify:
+    - Update Redmine runtime symlink
+
+- name: Stat shared-linked directories in Redmine release
+  ansible.builtin.stat:
+    path: "{{ _redmine_release_path }}/{{ item }}"
+  loop:
+    - files
+    - log
+    - public/plugin_assets
+  register: _redmine_release_dir_stats
+
+- name: Remove non-symlink default directories before symlinking shared paths
+  ansible.builtin.file:
+    path: "{{ _redmine_release_path }}/{{ item.item }}"
+    state: absent
+  loop: "{{ _redmine_release_dir_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.stat.exists
+    - not item.stat.islnk
+
+- name: Symlink persistent shared directories into release directory
+  ansible.builtin.file:
+    src: "{{ redmine_shared_dir }}/{{ item }}"
+    dest: "{{ _redmine_release_path }}/{{ item }}"
+    state: link
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+  loop:
+    - files
+    - log
+    - public/plugin_assets
+
+- name: Check whether shared secret_token.rb exists
+  ansible.builtin.stat:
+    path: "{{ redmine_shared_dir }}/config/secret_token.rb"
+  register: _redmine_shared_secret_stat
+
+- name: Link shared secret_token.rb into release directory when present
+  ansible.builtin.file:
+    src: "{{ redmine_shared_dir }}/config/secret_token.rb"
+    dest: "{{ _redmine_release_path }}/config/initializers/secret_token.rb"
+    state: link
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    force: true
+  when: _redmine_shared_secret_stat.stat.exists

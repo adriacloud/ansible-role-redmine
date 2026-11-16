@@ -1,0 +1,29 @@
+---
+name: linters
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  linters:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: "tests/requirements.txt"
+
+      - name: Install Tox
+        run: pip install tox
+
+      - name: Run Tox
+        id: run_tox
+        run: tox -e linters

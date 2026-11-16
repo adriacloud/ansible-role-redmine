@@ -1,0 +1,85 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+_redmine_distro_packages:
+  - acl
+  - curl
+  - gcc
+  - gcc-c++
+  - git
+  - libffi-devel
+  - libxml2-devel
+  - libxslt-devel
+  - make
+  - openssl-devel
+  - pkgconf-pkg-config
+  - sudo
+  - tar
+  - unzip
+  - xz
+  - zlib-ng-compat-devel
+
+_redmine_crb_packages:
+  - libyaml-devel
+
+_redmine_db_adapter_packages:
+  mysql2:
+    - mariadb-connector-c-devel
+  trilogy:
+    - mariadb-connector-c-devel
+  postgresql:
+    - libpq-devel
+  sqlite3:
+    - sqlite-devel
+
+_redmine_distro_certbot_packages:
+  - certbot
+  - python3-acme
+  - python3-augeas
+  - python3-certbot
+  - python3-certbot-apache
+  - python3-configargparse
+  - python3-josepy
+  - python3-parsedatetime
+  - python3-pyOpenSSL
+  - python3-pyrfc3339
+  - python3-pytz
+
+_redmine_repos:
+  - name: epel-redmine-certbot
+    baseurl: >-
+      {{
+        redmine_epel_mirror ~
+        '/' ~
+        (
+          (ansible_facts['distribution'] | lower == 'centos')
+          | ternary(ansible_facts['distribution_major_version'], ansible_facts['distribution_version'] ~ 'z')
+        ) ~
+        '/Everything/' ~
+        ansible_facts['architecture']
+      }}
+    description: "Extra Packages for Enterprise Linux $releasever - $basearch"
+    gpgkey: "file://{{ (_redmine_package_repos_keys | selectattr('name', 'eq', 'epel-10') | first).key }}"
+    gpgcheck: true
+    enabled: true
+    includepkgs: "{{ _redmine_distro_certbot_packages }}"
+    state: present
+
+_redmine_package_repos_keys:
+  - name: epel-10
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-10
+    url: "{{ redmine_epel_key }}"
+
+_redmine_httpd_extra_modules: []

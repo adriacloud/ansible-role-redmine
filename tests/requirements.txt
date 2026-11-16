@@ -1,0 +1,4 @@
+ansible-lint==26.9.0 # MIT
+docker>=7.0.0 # Apache-2.0
+molecule==26.9.0 # MIT
+molecule-plugins[docker]==26.9.28 # MIT

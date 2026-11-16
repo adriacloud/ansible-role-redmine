@@ -1,0 +1,81 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Create Redmine system group
+  ansible.builtin.group:
+    name: "{{ redmine_system_group_name }}"
+    state: present
+    system: true
+
+- name: Create Redmine system user
+  ansible.builtin.user:
+    name: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    comment: "Redmine application user"
+    home: "{{ redmine_base_dir }}"
+    shell: /bin/bash
+    system: true
+    create_home: false
+
+- name: Remove existing Ruby and Redmine install directories on forced reinstall
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ redmine_ruby_install_dir }}"
+    - "{{ redmine_install_dir }}"
+  when: redmine_force_reinstall | bool
+
+- name: Create Redmine base and shared directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(redmine_system_user_name) }}"
+    group: "{{ item.group | default(redmine_system_group_name) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - path: "{{ redmine_base_dir }}"
+    - path: "{{ redmine_releases_dir }}"
+    - path: "{{ redmine_ruby_install_dir }}"
+      owner: root
+      group: root
+    - path: "{{ redmine_install_dir }}"
+    - path: "{{ redmine_install_dir }}/tmp"
+    - path: "{{ redmine_install_dir }}/tmp/pdf"
+    - path: "{{ redmine_install_dir }}/tmp/pids"
+    - path: "{{ redmine_install_dir }}/tmp/cache"
+    - path: "{{ redmine_shared_dir }}"
+    - path: "{{ redmine_shared_dir }}/config"
+      mode: "0750"
+    - path: "{{ redmine_shared_dir }}/files"
+    - path: "{{ redmine_shared_dir }}/log"
+    - path: "{{ redmine_shared_dir }}/public"
+    - path: "{{ redmine_shared_dir }}/public/plugin_assets"
+    - path: "{{ redmine_shared_dir }}/bundle"
+    - path: "{{ redmine_shared_dir }}/plugins_cache"
+    - path: "{{ redmine_cache_dir }}"
+    - path: /etc/ansible/facts.d
+      owner: root
+      group: root
+
+- name: Ensure sqlite3 database directory exists
+  ansible.builtin.file:
+    path: "{{ _redmine_db['database'] | dirname }}"
+    state: directory
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0750"
+  when:
+    - _redmine_db['adapter'] == 'sqlite3'
