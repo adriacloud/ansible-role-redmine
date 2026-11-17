@@ -1,0 +1,154 @@
+---
+- name: Verify Redmine installation
+  hosts: redmine
+  vars:
+    _expected_httpd_service:
+      debian: apache2
+      redhat: httpd
+    _os_family: "{{ ansible_facts['os_family'] | lower }}"
+  tasks:
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Refresh local facts
+      ansible.builtin.setup:
+        filter: ansible_local
+        gather_subset: "!all"
+
+    - name: Fetch Redmine releases directory when verifying major/minor stream
+      ansible.builtin.uri:
+        url: "{{ redmine_releases_url | default('https://www.redmine.org/releases') }}/"
+        return_content: true
+      register: _verify_releases_page
+      when: (redmine_version | string | trim) is not match('^\d+\.\d+\.\d+$')
+
+    - name: Determine expected Redmine version
+      vars:
+        _ver_str: "{{ redmine_version | string | trim }}"
+        _ver_pattern: >-
+          {{
+            (_ver_str == 'latest') | ternary(
+              'redmine-(\d+\.\d+\.\d+)\.tar\.gz',
+              'redmine-(' ~ (_ver_str | regex_escape) ~ '(?:\.\d+)+)\.tar\.gz'
+            )
+          }}
+      ansible.builtin.set_fact:
+        _expected_redmine_version: >-
+          {%- if _ver_str is match('^\d+\.\d+\.\d+$') -%}
+          {{ _ver_str }}
+          {%- else -%}
+          {{
+            _verify_releases_page.content
+            | regex_findall(_ver_pattern)
+            | unique
+            | community.general.version_sort
+            | last
+          }}
+          {%- endif -%}
+
+    - name: Assert local fact version matches expected Redmine version
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['ansible_local']['redmine']['general']['version'] == _expected_redmine_version
+
+    - name: Query Redmine version and registered plugins via Rails runner
+      ansible.builtin.shell: |
+        set -euo pipefail
+        export PATH="/opt/ruby/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+        export RAILS_ENV=production
+        cd /srv/redmine/redmine
+        bundle exec rails runner '
+          puts "VERSION=#{[Redmine::VERSION::MAJOR, Redmine::VERSION::MINOR, Redmine::VERSION::TINY].join(".")}"
+          Redmine::Plugin.all.each do |p|
+            puts "PLUGIN=#{p.id}:#{p.version}"
+          end
+        '
+      args:
+        executable: /bin/bash
+      become: true
+      become_user: redmine
+      register: _redmine_runner_info
+      changed_when: false
+
+    - name: Assert Redmine runtime version and plugins match expected state
+      ansible.builtin.assert:
+        that:
+          - ("VERSION=" ~ _expected_redmine_version) in _redmine_runner_info.stdout_lines
+          - "'PLUGIN=redmine_test_plugin:0.0.2' in _redmine_runner_info.stdout_lines"
+          - "'PLUGIN=redmine_code_review:1.2.2' in _redmine_runner_info.stdout_lines"
+
+    - name: Assert Redmine and Apache httpd services are running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['services']['redmine.service']['state'] == 'running'
+          - ansible_facts['services'][_expected_httpd_service[_os_family] ~ '.service']['state'] == 'running'
+
+    - name: Fetch listening TCP ports
+      community.general.listen_ports_facts:
+
+    - name: Assert expected TCP ports are listening
+      vars:
+        _tcp_ports: "{{ ansible_facts['tcp_listen'] | map(attribute='port') | list | unique }}"
+      ansible.builtin.assert:
+        that:
+          - 80 in _tcp_ports
+          - 443 in _tcp_ports
+          - 3000 in _tcp_ports
+
+    - name: Verify Let's Encrypt certificate exists when enabled
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ redmine_server_name }}/fullchain.pem"
+      register: _le_cert_stat
+      when: redmine_ssl_letsencrypt_enable | default(false) | bool
+
+    - name: Assert Let's Encrypt certificate file exists
+      ansible.builtin.assert:
+        that:
+          - _le_cert_stat.stat.exists
+      when: redmine_ssl_letsencrypt_enable | default(false) | bool
+
+    - name: Verify generated TLS certificate details
+      community.crypto.x509_certificate_info:
+        path: "/etc/ssl/certs/httpd_{{ inventory_hostname }}_redmine_https.pem"
+      register: _redmine_cert_info
+
+    - name: Assert TLS certificate is valid and issued by HTTPD Intermediate CA
+      ansible.builtin.assert:
+        that:
+          - _redmine_cert_info['issuer']['commonName'] == 'Apache HTTPD Intermediate CA'
+          - not _redmine_cert_info['expired']
+      when: not (redmine_ssl_letsencrypt_enable | default(false) | bool)
+
+    - name: Assert Let's Encrypt TLS certificate SAN and issuer
+      ansible.builtin.assert:
+        that:
+          - redmine_server_name in (_redmine_cert_info['subject_alt_name'] | default([]) | map('regex_replace', '^(DNS|IP):', '') | list)
+          - >-
+            'Molecule Test CA' in (_redmine_cert_info['issuer']['commonName'] | default(''))
+            or 'Intermediate' in (_redmine_cert_info['issuer']['commonName'] | default(''))
+            or 'Molecule Test CA' in (_redmine_cert_info['issuer']['organizationName'] | default(''))
+          - not _redmine_cert_info['expired']
+      when: redmine_ssl_letsencrypt_enable | default(false) | bool
+
+    - name: Verify HTTP redirects to HTTPS
+      ansible.builtin.uri:
+        url: "http://{{ (redmine_ssl_letsencrypt_enable | default(false) | bool) | ternary(redmine_server_name, '127.0.0.1') }}/"
+        follow_redirects: none
+        status_code: 301
+      register: _http_redirect
+
+    - name: Verify Redmine responds cleanly over HTTPS
+      ansible.builtin.uri:
+        url: "https://{{ (redmine_ssl_letsencrypt_enable | default(false) | bool) | ternary(redmine_server_name, '127.0.0.1') }}/"
+        validate_certs: "{{ redmine_ssl_letsencrypt_enable | default(false) | bool }}"
+        return_content: true
+        status_code: 200
+      register: _https_response
+      until: _https_response.status == 200
+      retries: 10
+      delay: 3
+
+    - name: Assert Redmine HTML content is served
+      ansible.builtin.assert:
+        that:
+          - "'Redmine' in _https_response.content"

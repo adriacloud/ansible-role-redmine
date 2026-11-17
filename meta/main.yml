@@ -1,0 +1,25 @@
+---
+galaxy_info:
+  author: Adria Cloud Services
+  description: Installation and configuration of Redmine
+  license: Apache-2.0
+  role_name: redmine
+  namespace: adriacloud
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+    - name: Ubuntu
+      versions:
+        - noble
+        - resolute
+    - name: EL
+      versions:
+        - "10"
+  galaxy_tags:
+    - redmine
+    - ticketing
+    - agile
+dependencies: []

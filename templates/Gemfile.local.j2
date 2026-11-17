@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+
+{% for gem_item in redmine_local_gems %}
+{% if gem_item is string %}
+gem '{{ gem_item }}'
+{% else %}
+gem '{{ gem_item.name }}'{{ (", '" ~ gem_item.version ~ "'") if gem_item.version is defined else '' }}{{ (', require: ' ~ (gem_item.require | string | lower)) if gem_item.require is defined else '' }}
+{% endif %}
+{% endfor %}

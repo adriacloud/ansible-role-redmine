@@ -1,0 +1,103 @@
+---
+- name: Prepare database node (infra)
+  hosts: infra
+  vars:
+    _db_conf_dir:
+      debian: /etc/mysql/mariadb.conf.d
+      redhat: /etc/my.cnf.d
+    _db_packages:
+      debian:
+        - iproute2
+        - mariadb-server
+        - python3-pymysql
+      redhat:
+        - iproute
+        - mariadb-server
+        - python3-PyMySQL
+    _db_socket:
+      debian: /run/mysqld/mysqld.sock
+      redhat: /var/lib/mysql/mysql.sock
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts['os_family'] | lower == 'debian'
+
+    - name: Install MariaDB server and PyMySQL
+      ansible.builtin.package:
+        name: "{{ _db_packages[ansible_facts['os_family'] | lower] }}"
+        state: present
+      register: _install_mariadb
+      until: _install_mariadb is success
+      retries: 5
+      delay: 5
+
+    - name: Refresh facts on database node after installing iproute
+      ansible.builtin.setup:
+
+    - name: Configure MariaDB to listen on all interfaces
+      ansible.builtin.copy:
+        content: |
+          [mysqld]
+          bind-address = 0.0.0.0
+        dest: "{{ _db_conf_dir[ansible_facts['os_family'] | lower] }}/99-redmine-bind.cnf"
+        mode: "0644"
+      register: _mariadb_bind_cfg
+
+    - name: Ensure MariaDB service is enabled and started
+      ansible.builtin.service:
+        name: mariadb
+        state: "{{ (_mariadb_bind_cfg is changed) | ternary('restarted', 'started') }}"
+        enabled: true
+
+    - name: Create Redmine database
+      ansible.mariadb.mariadb_db:
+        name: "{{ redmine_db['database'] }}"
+        encoding: utf8mb4
+        collation: utf8mb4_unicode_ci
+        state: present
+        login_unix_socket: "{{ _db_socket[ansible_facts['os_family'] | lower] }}"
+
+    - name: Create Redmine database user
+      ansible.mariadb.mariadb_user:
+        name: "{{ redmine_db['username'] }}"
+        password: "{{ redmine_db['password'] }}"
+        host: "%"
+        priv: "{{ redmine_db['database'] }}.*:ALL"
+        append_privs: true
+        state: present
+        login_unix_socket: "{{ _db_socket[ansible_facts['os_family'] | lower] }}"
+      no_log: true
+
+- name: Prepare Redmine node prerequisites
+  hosts: redmine
+  vars:
+    _prepare_packages:
+      debian:
+        - ca-certificates
+        - iproute2
+        - procps
+        - python3-cryptography
+        - sudo
+      redhat:
+        - ca-certificates
+        - iproute
+        - procps-ng
+        - python3-cryptography
+        - sudo
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_facts['os_family'] | lower == 'debian'
+
+    - name: Install verification prerequisites
+      ansible.builtin.package:
+        name: "{{ _prepare_packages[ansible_facts['os_family'] | lower] }}"
+        state: present
+      register: _install_prereqs
+      until: _install_prereqs is success
+      retries: 5
+      delay: 5

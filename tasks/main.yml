@@ -1,0 +1,121 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+- name: Gather variables for each operating system
+  ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+  vars:
+    params:
+      files:
+        - "{{ ansible_facts['distribution'] | lower }}-{{ ansible_facts['distribution_version'] | lower }}.yml"
+        - "{{ ansible_facts['distribution'] | lower }}-{{ ansible_facts['distribution_major_version'] | lower }}.yml"
+        - "{{ ansible_facts['os_family'] | lower }}-{{ ansible_facts['distribution_major_version'] | lower }}.yml"
+        - "{{ ansible_facts['distribution'] | lower }}.yml"
+        - "{{ ansible_facts['os_family'] | lower }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+  tags:
+    - always
+
+- name: Resolve Redmine version and installed facts
+  ansible.builtin.import_tasks:
+    file: redmine_resolve_version.yml
+  tags:
+    - always
+
+- name: Run pre-install tasks
+  ansible.builtin.import_tasks:
+    file: redmine_pre_install.yml
+  tags:
+    - redmine-install
+
+- name: Install system packages and Ruby runtime
+  ansible.builtin.import_tasks:
+    file: redmine_install.yml
+  tags:
+    - redmine-install
+
+- name: Configure Redmine application files
+  ansible.builtin.import_tasks:
+    file: redmine_configure.yml
+  tags:
+    - redmine-config
+
+- name: Manage Redmine plugins
+  ansible.builtin.import_tasks:
+    file: redmine_plugins.yml
+  tags:
+    - redmine-install
+    - redmine-plugins
+
+- name: Run post-install tasks (Bundler, migrations, release activation)
+  ansible.builtin.import_tasks:
+    file: redmine_post_install.yml
+  tags:
+    - redmine-install
+    - redmine-config
+    - redmine-plugins
+
+- name: Configure Redmine systemd unit via systemd_service role
+  ansible.builtin.include_role:
+    name: systemd_service
+    apply:
+      tags:
+        - redmine-config
+        - systemd-service
+  vars: # noqa: var-naming[no-role-prefix]
+    systemd_services:
+      - service_name: "{{ redmine_service_name }}"
+        service_description: "Redmine application server (Puma)"
+        service_type: simple
+        systemd_user_name: "{{ redmine_system_user_name }}"
+        systemd_group_name: "{{ redmine_system_group_name }}"
+        systemd_slice_name: "{{ redmine_service_name }}"
+        config_overrides:
+          Service:
+            User: "{{ redmine_system_user_name }}"
+            Group: "{{ redmine_system_group_name }}"
+            WorkingDirectory: "{{ redmine_runtime_directory }}"
+            SyslogIdentifier: "{{ redmine_service_name }}"
+        environment:
+          RAILS_ENV: "{{ redmine_rails_env }}"
+          RAILS_SERVE_STATIC_FILES: "true"
+          PATH: "{{ _redmine_ruby_runtime_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        execstarts:
+          - "{{ _redmine_ruby_runtime_bin_dir }}/bundle exec puma -C {{ redmine_runtime_directory }}/config/puma.rb"
+        enabled: true
+        restart_changed: false
+
+- name: Flush handlers for Redmine service
+  ansible.builtin.meta: flush_handlers
+
+- name: Allow Apache httpd to proxy network connections when SELinux is enabled
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+  when:
+    - redmine_configure_httpd | bool
+    - ansible_facts['os_family'] | lower == 'redhat'
+    - ansible_facts.get('selinux', {}).get('status', 'disabled') == 'enabled'
+  tags:
+    - redmine-config
+
+- name: Configure Apache httpd reverse proxy and TLS
+  ansible.builtin.import_tasks:
+    file: redmine_httpd.yml
+  when:
+    - redmine_configure_httpd | bool
+  tags:
+    - redmine-config
+    - redmine-httpd

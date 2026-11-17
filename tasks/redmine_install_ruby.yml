@@ -1,0 +1,67 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Install EL CRB packages needed for Ruby gem compilation
+  ansible.builtin.dnf:
+    name: "{{ _redmine_crb_packages }}"
+    enablerepo: crb
+    state: "{{ redmine_package_state }}"
+  register: _redmine_install_crb_packages
+  until: _redmine_install_crb_packages is success
+  retries: 5
+  delay: 5
+  when:
+    - ansible_facts['pkg_mgr'] == 'dnf'
+    - _redmine_crb_packages | default([]) | length > 0
+
+- name: Install Redmine distro dependencies
+  ansible.builtin.package:
+    name: >-
+      {{
+        (
+          _redmine_distro_packages
+          + (_redmine_db_adapter_packages[_redmine_db['adapter']] | default([]))
+          + redmine_extra_packages
+        ) | reject('equalto', '') | unique | list
+      }}
+    state: "{{ redmine_package_state }}"
+    update_cache: "{{ (ansible_facts['pkg_mgr'] == 'apt') | ternary(true, omit) }}"
+    cache_valid_time: "{{ (ansible_facts['pkg_mgr'] == 'apt') | ternary(cache_timeout, omit) }}"
+  register: _redmine_install_packages
+  until: _redmine_install_packages is success
+  retries: 5
+  delay: 5
+
+- name: Download prebuilt Ruby archive
+  ansible.builtin.get_url:
+    url: "{{ redmine_ruby_prebuilt_url }}"
+    dest: "{{ redmine_cache_dir }}/ruby-{{ redmine_ruby_version }}.tar.gz"
+    mode: "0644"
+    validate_certs: "{{ redmine_download_validate_certs }}"
+  register: _redmine_prebuilt_ruby_dl
+  until: _redmine_prebuilt_ruby_dl is success
+  retries: 3
+  delay: 5
+
+- name: Unpack prebuilt Ruby archive
+  ansible.builtin.unarchive:
+    src: "{{ _redmine_prebuilt_ruby_dl.dest }}"
+    dest: "{{ redmine_ruby_install_dir }}"
+    remote_src: true
+    creates: "{{ _redmine_ruby_bin_dir }}/ruby"
+    extra_opts:
+      - --strip-components=1
+  notify:
+    - Update Ruby runtime symlink

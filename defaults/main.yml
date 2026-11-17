@@ -1,0 +1,144 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Redmine version to deploy. Accepts:
+# - Exact patch version (e.g. "7.0.3", "6.1.6")
+# - Major.Minor prefix (e.g. "7.0", "6.1") -> resolves latest patch release
+# - Major prefix (e.g. "7", "6") -> resolves latest minor.patch release
+# - "latest" -> resolves highest available release from redmine_releases_url
+redmine_version: "7"
+redmine_ruby_version_map:
+  "5": "3.2.2"
+  "6": "3.3.13"
+  "7": "3.4.12"
+
+redmine_releases_url: "https://www.redmine.org/releases"
+redmine_download_url: "{{ redmine_releases_url }}/redmine-{{ _redmine_version }}.tar.gz"
+redmine_download_checksum_url: "{{ redmine_download_url }}.sha256"
+redmine_download_validate_certs: true
+redmine_verify_checksum: true
+redmine_force_reinstall: false
+
+# Package install state
+redmine_package_state: "{{ package_state | default('present') }}"
+redmine_extra_packages: []
+
+# System user and directory layout
+redmine_system_user_name: redmine
+redmine_system_group_name: redmine
+redmine_service_name: redmine
+redmine_base_dir: /srv/redmine
+redmine_releases_dir: "{{ redmine_base_dir }}/releases"
+redmine_install_dir: "{{ redmine_releases_dir }}/redmine-{{ _redmine_version }}"
+redmine_shared_dir: "{{ redmine_base_dir }}/shared"
+redmine_runtime_directory: "{{ redmine_base_dir }}/redmine"
+redmine_cache_dir: "{{ redmine_shared_dir }}/cache"
+redmine_keep_releases: 3
+
+# Prebuilt Ruby runtime configuration (mapped by Redmine major version)
+redmine_ruby_runtime_dir: /opt/ruby
+redmine_ruby_version: "{{ redmine_ruby_version_map[_redmine_major_version] | default('3.4.12') }}"
+redmine_ruby_install_dir: "/opt/ruby-{{ redmine_ruby_version }}"
+redmine_ruby_prebuilt_arch_map:
+  x86_64: x86_64_linux
+  amd64: x86_64_linux
+  aarch64: arm64_linux
+  arm64: arm64_linux
+_redmine_ruby_prebuilt_arch: "{{ redmine_ruby_prebuilt_arch_map[ansible_facts['architecture']] | default('x86_64_linux') }}"
+redmine_ruby_prebuilt_url: >-
+  https://github.com/jdx/ruby/releases/download/{{ redmine_ruby_version }}/ruby-{{
+  redmine_ruby_version }}.{{ _redmine_ruby_prebuilt_arch }}.tar.gz
+
+# Bundler / Application server (Puma) settings
+redmine_rails_env: production
+redmine_bundle_without:
+  - development
+  - test
+redmine_bundle_jobs: "{{ [ansible_facts['processor_vcpus'] | default(2), 4] | min }}"
+redmine_local_gems:
+  - name: puma
+redmine_app_bind_address: "{{ (redmine_configure_httpd | bool) | ternary('127.0.0.1', '0.0.0.0') }}"
+redmine_app_port: 3000
+redmine_puma_workers: 2
+redmine_puma_threads_min: 1
+redmine_puma_threads_max: 5
+redmine_puma_worker_timeout: 60
+
+# Database configuration (database engine deployment is external to this role)
+redmine_db:
+  adapter: mysql2
+  host: localhost
+  port: 3306
+  database: redmine
+  username: redmine
+  password: "changeme"
+  encoding: utf8mb4
+  variables: {}
+redmine_db_migrate_force: false
+redmine_load_default_data: true
+redmine_language: en
+
+# Optional Redmine configuration.yml settings
+# Set to true if you want to use SMTP email sending
+# redmine_smtp_settings:
+#   address: localhost
+#   port: 25
+#   authentication: plain
+#   domain: "{{ redmine_server_name }}"
+#   user_name: ""
+#   password: ""
+#   enable_starttls_auto: false
+redmine_smtp_settings: {}
+redmine_configuration: {}
+
+# Redmine plugins list
+# Each entry requires `name` and either `repo` (git), `url` (archive), or `src` (deploy-host path/archive).
+# Set `state: absent` to remove a plugin.
+redmine_plugins: []
+
+# Apache httpd reverse proxy & TLS settings
+redmine_configure_httpd: true
+redmine_server_name: "{{ ansible_facts['fqdn'] }}"
+redmine_http_port: 80
+redmine_https_port: 443
+redmine_ssl: true
+redmine_http_vhost_name: redmine_http
+redmine_ssl_vhost_name: redmine_https
+redmine_httpd_extra_vhosts: []
+
+# User-supplied TLS certificates (if not defined, httpd/pki generates certificates)
+# redmine_user_ssl_cert: <path to cert on ansible deployment host>
+# redmine_user_ssl_key: <path to key on ansible deployment host>
+# redmine_user_ssl_ca_cert: <path to ca cert on ansible deployment host>
+
+# Self-signed/ownca PKI SAN configuration when using httpd/pki
+redmine_pki_san:
+  dns: "{{ [ansible_facts['hostname'], ansible_facts['fqdn'], redmine_server_name] | unique }}"
+
+# Let's Encrypt / Certbot configuration
+redmine_ssl_letsencrypt_enable: false
+redmine_ssl_letsencrypt_certbot_binary: "certbot"
+redmine_ssl_letsencrypt_email: "example@example.com"
+redmine_ssl_letsencrypt_config_path: "/etc/letsencrypt/live"
+redmine_ssl_letsencrypt_setup_extra_params: ""
+# Use alternative CA that supports ACME, can be a public or private CA
+# redmine_ssl_letsencrypt_certbot_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
+redmine_ssl_letsencrypt_domains:
+  - "{{ redmine_server_name }}"
+
+# EPEL mirror settings for RedHat family certbot installation
+redmine_epel_mirror: "{{ centos_epel_mirror | default('https://dl.fedoraproject.org/pub/epel') }}"
+redmine_epel_key: >-
+  {{ centos_epel_key | default('https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-' ~ ansible_facts['distribution_major_version']) }}

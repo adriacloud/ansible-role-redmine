@@ -1,0 +1,103 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Add required EL repositories for certbot
+  when:
+    - ansible_facts['os_family'] | lower == 'redhat'
+  block:
+    - name: If a keyfile is provided, copy the gpg keyfile to the key location
+      ansible.builtin.copy:
+        src: "{{ item.keyfile }}"
+        dest: "{{ item.key }}"
+        mode: "0644"
+      loop: "{{ _redmine_package_repos_keys | selectattr('keyfile', 'defined') | list }}"
+
+    - name: If a url is provided, download the gpg keyfile to the key location
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.key }}"
+        mode: "0644"
+        validate_certs: "{{ redmine_download_validate_certs }}"
+      loop: "{{ _redmine_package_repos_keys | selectattr('url', 'defined') | list }}"
+
+    - name: Import repository GPG keys for epel
+      ansible.builtin.rpm_key:
+        key: "{{ item.key }}"
+        state: present
+      loop: "{{ _redmine_package_repos_keys }}"
+
+    - name: Configure epel repository for certbot
+      ansible.builtin.yum_repository:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        baseurl: "{{ item.baseurl }}"
+        gpgkey: "{{ item.gpgkey }}"
+        gpgcheck: "{{ item.gpgcheck }}"
+        enabled: "{{ item.enabled }}"
+        state: "{{ item.state }}"
+        includepkgs: "{{ item.includepkgs }}"
+      loop: "{{ _redmine_repos }}"
+
+- name: Install certbot from distro package
+  ansible.builtin.package:
+    name: "{{ _redmine_distro_certbot_packages }}"
+    state: present
+
+- name: Check if Let's Encrypt certificate exists
+  community.crypto.x509_certificate_info:
+    path: "{{ redmine_ssl_letsencrypt_config_path }}/{{ redmine_ssl_letsencrypt_domains | first }}/fullchain.pem"
+  register: _redmine_letsencrypt_certificate
+  ignore_errors: true
+
+- name: Create or expand SSL certificate with certbot
+  vars:
+    _letsencrypt_certificate_domains_changed: >
+      {{
+        (_redmine_letsencrypt_certificate is success) | ternary(
+          (_redmine_letsencrypt_certificate.subject_alt_name | default([]) | map(
+            'regex_replace', '^(DNS|IP):(.*)$', '\2'
+          ) | sort | list) != (redmine_ssl_letsencrypt_domains | sort | list),
+          true
+        )
+      }}
+    _redmine_certbot_deploy_hook: >-
+      ln -sf
+      {{ redmine_ssl_letsencrypt_config_path }}/{{ redmine_ssl_letsencrypt_domains | first }}/fullchain.pem
+      /etc/ssl/certs/httpd_{{ inventory_hostname }}_{{ redmine_ssl_vhost_name }}.pem
+      && ln -sf
+      {{ redmine_ssl_letsencrypt_config_path }}/{{ redmine_ssl_letsencrypt_domains | first }}/privkey.pem
+      /etc/ssl/private/httpd_{{ inventory_hostname }}_{{ redmine_ssl_vhost_name }}.key
+      && systemctl reload
+      {{ (ansible_facts['os_family'] | lower == 'debian') | ternary('apache2', 'httpd') }}
+  throttle: 1
+  ansible.builtin.command:
+    cmd: >-
+      {{ redmine_ssl_letsencrypt_certbot_binary }} certonly
+      --apache
+      --agree-tos
+      --non-interactive
+      --text
+      --rsa-key-size 4096
+      --email {{ redmine_ssl_letsencrypt_email }}
+      --domains {{ redmine_ssl_letsencrypt_domains | join(',') }}
+      --expand
+      --deploy-hook "{{ _redmine_certbot_deploy_hook }}"
+      {% if redmine_ssl_letsencrypt_certbot_server is defined %}
+      --server {{ redmine_ssl_letsencrypt_certbot_server }}
+      {% endif %}
+      {{ redmine_ssl_letsencrypt_setup_extra_params }}
+  register: _redmine_certbot_output
+  changed_when: "'Certificate not yet due for renewal; no action taken.' not in _redmine_certbot_output.stdout_lines"
+  when: _letsencrypt_certificate_domains_changed | bool

@@ -1,0 +1,41 @@
+---
+dependency:
+  name: galaxy
+  enabled: false
+
+driver:
+  name: docker
+
+platforms:
+  - name: "redmine-${MOLECULE_SCENARIO_NAME}"
+    image: "${DOCKER_REGISTRY:-quay.io/gotmax23}/${DOCKER_IMAGE_TAG:-ubuntu-systemd:resolute}"
+    command: ${DOCKER_COMMAND:-""}
+    pre_build_image: true
+    privileged: true
+    groups:
+      - redmine
+  - name: "infra-${MOLECULE_SCENARIO_NAME}"
+    image: "${DOCKER_REGISTRY:-quay.io/gotmax23}/${DOCKER_IMAGE_TAG:-ubuntu-systemd:resolute}"
+    command: ${DOCKER_COMMAND:-""}
+    pre_build_image: true
+    privileged: true
+    groups:
+      - infra
+
+provisioner:
+  name: ansible
+  lint:
+    name: ansible-lint
+  playbooks:
+    prepare: ../../tests/prepare-n1.yml
+    converge: ../../tests/test.yml
+    verify: ../../tests/verify.yml
+  inventory:
+    links:
+      group_vars: ../../tests/group_vars/
+  config_options:
+    defaults:
+      inject_facts_as_vars: false
+
+scenario:
+  name: upgrade

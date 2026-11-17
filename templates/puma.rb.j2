@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+
+directory "{{ redmine_runtime_directory }}"
+environment "{{ redmine_rails_env }}"
+bind "tcp://{{ redmine_app_bind_address }}:{{ redmine_app_port }}"
+{% if redmine_puma_workers | int > 0 %}
+workers {{ redmine_puma_workers | int }}
+{% endif %}
+threads {{ redmine_puma_threads_min | int }}, {{ redmine_puma_threads_max | int }}
+worker_timeout {{ redmine_puma_worker_timeout | int }}
+pidfile "{{ redmine_runtime_directory }}/tmp/pids/puma.pid"
+state_path "{{ redmine_runtime_directory }}/tmp/pids/puma.state"

@@ -1,0 +1,6 @@
+.tox/
+.ansible/
+.cache/
+*.retry
+*.pyc
+__pycache__/
