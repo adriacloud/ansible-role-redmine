@@ -1,0 +1,44 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Ensure Redmine themes directory exists
+  ansible.builtin.file:
+    path: "{{ _redmine_themes_dir }}"
+    state: directory
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0755"
+  when: redmine_themes | length > 0
+
+- name: Initialize theme change tracking flag
+  ansible.builtin.set_fact:
+    _redmine_extension_changed: false
+
+- name: Process configured Redmine themes
+  ansible.builtin.include_tasks:
+    file: redmine_extension_install.yml
+  loop: "{{ redmine_themes }}"
+  loop_control:
+    loop_var: _ext_item
+    label: "{{ _ext_item.name }}"
+  vars:
+    _ext_dir: "{{ _redmine_themes_dir }}/{{ _ext_item.name }}"
+    _ext_cache_dir: "{{ redmine_shared_dir }}/themes_cache"
+    _ext_root_marker: "stylesheets/application.css"
+    _ext_meta_file: ".ansible_theme_meta"
+
+- name: Record Redmine theme change flag
+  ansible.builtin.set_fact:
+    _redmine_themes_changed: "{{ _redmine_extension_changed | bool }}"

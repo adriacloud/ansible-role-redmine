@@ -144,11 +144,27 @@
   changed_when: true
   when:
     - redmine_plugins | length > 0
-    - (_redmine_needs_db_migrate | bool) or (_redmine_plugins_changed | bool)
+    - (_redmine_needs_db_migrate | bool) or (_redmine_plugins_changed | default(false) | bool)
   notify:
     - Restart redmine
 
-- name: Clear Redmine cache on upgrade or plugin change
+- name: Precompile Redmine assets on upgrade, plugin, or theme change
+  ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake assets:precompile"
+  args:
+    chdir: "{{ _redmine_release_path }}"
+  become: true
+  become_user: "{{ redmine_system_user_name }}"
+  environment:
+    RAILS_ENV: "{{ redmine_rails_env }}"
+    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  changed_when: true
+  when:
+    - _redmine_major_version | int >= 6
+    - (_redmine_is_upgrade | bool) or (_redmine_plugins_changed | default(false) | bool) or (_redmine_themes_changed | default(false) | bool)
+  notify:
+    - Restart redmine
+
+- name: Clear Redmine cache on upgrade, plugin, or theme change
   ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake tmp:cache:clear"
   args:
     chdir: "{{ _redmine_release_path }}"
@@ -158,7 +174,7 @@
     RAILS_ENV: "{{ redmine_rails_env }}"
     PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   changed_when: true
-  when: (_redmine_is_upgrade | bool) or (_redmine_plugins_changed | bool)
+  when: (_redmine_is_upgrade | bool) or (_redmine_plugins_changed | default(false) | bool) or (_redmine_themes_changed | default(false) | bool)
   notify:
     - Restart redmine
 

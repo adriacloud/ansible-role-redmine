@@ -58,6 +58,13 @@
     - redmine-install
     - redmine-plugins
 
+- name: Manage Redmine themes
+  ansible.builtin.import_tasks:
+    file: redmine_themes.yml
+  tags:
+    - redmine-install
+    - redmine-themes
+
 - name: Run post-install tasks (Bundler, migrations, release activation)
   ansible.builtin.import_tasks:
     file: redmine_post_install.yml
@@ -65,6 +72,7 @@
     - redmine-install
     - redmine-config
     - redmine-plugins
+    - redmine-themes
 
 - name: Configure Redmine systemd unit via systemd_service role
   ansible.builtin.include_role:

@@ -109,6 +109,11 @@ redmine_configuration: {}
 # Set `state: absent` to remove a plugin.
 redmine_plugins: []
 
+# Redmine themes list
+# Each entry requires `name` and either `repo` (git), `url` (archive), or `src` (deploy-host path/archive).
+# Set `state: absent` to remove a theme.
+redmine_themes: []
+
 # Apache httpd reverse proxy & TLS settings
 redmine_configure_httpd: true
 redmine_server_name: "{{ ansible_facts['fqdn'] }}"

@@ -65,6 +65,7 @@
     - path: "{{ redmine_shared_dir }}/public/plugin_assets"
     - path: "{{ redmine_shared_dir }}/bundle"
     - path: "{{ redmine_shared_dir }}/plugins_cache"
+    - path: "{{ redmine_shared_dir }}/themes_cache"
     - path: "{{ redmine_cache_dir }}"
     - path: /etc/ansible/facts.d
       owner: root

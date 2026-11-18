@@ -13,17 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-- name: Validate redmine_plugins definitions
+- name: Validate redmine_plugins and redmine_themes definitions
   ansible.builtin.assert:
     that:
       - item.name is defined
       - item.name | length > 0
       - (item.state | default('present') == 'absent') or (item.repo is defined or item.url is defined or item.src is defined)
     fail_msg: >-
-      Each item in redmine_plugins must define 'name' and at least one of 'repo', 'url', or 'src' (unless state is 'absent').
-  loop: "{{ redmine_plugins }}"
+      Each item in {{ item._var }} must define 'name' and at least one of 'repo', 'url', or 'src' (unless state is 'absent').
+  loop: >-
+    {{
+      (redmine_plugins | map('combine', {'_var': 'redmine_plugins'}) | list)
+      + (redmine_themes | map('combine', {'_var': 'redmine_themes'}) | list)
+    }}
   loop_control:
-    label: "{{ item.name | default('unnamed') }}"
+    label: "{{ item._var }}:{{ item.name | default('unnamed') }}"
 
 - name: Discover latest matching Redmine release when exact patch version is not given
   when: (redmine_version | string | trim) is not match('^\d+\.\d+\.\d+$')

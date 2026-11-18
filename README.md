@@ -12,11 +12,11 @@ Ansible role to install, configure, and upgrade [Redmine](https://www.redmine.or
 - **Flexible Redmine version resolution**: Pin an exact version (`7.0.3`), a `major.minor` stream (`7.0`, `6.1`), a `major` stream (`7`, `6`), or `latest` — the role resolves the latest matching tarball from `redmine_releases_url` and verifies its SHA-256 checksum.
 - **Consistent Ruby runtime**: Always installs a standalone prebuilt Ruby runtime (`/opt/ruby`) mapped by Redmine major version via `redmine_ruby_version_map`, ensuring the exact same Ruby version across all supported distributions.
 - **Release-based upgrades & rollbacks**: Installs each release under `/opt/redmine/releases/redmine-<version>`, preserves `files/`, `log/`, `bundle/`, and `config/initializers/secret_token.rb` in `/opt/redmine/shared`, switches `/opt/redmine/redmine` symlink atomically, and runs `bundle install`, `db:migrate`, `redmine:plugins:migrate`, and `tmp:cache:clear` during upgrades.
-- **Plugin management & upgrades**: Supports plugins from:
+- **Plugin & theme management & upgrades**: Supports plugins (`redmine_plugins`) and themes (`redmine_themes`, targeting `themes/` on Redmine ≥ 6 or `public/themes/` on Redmine 5) from:
   - Git repositories (`repo`, optional `version`)
   - Remote archives (`url`, optional `version`, `checksum`, `sub_dir`)
   - Deploy-host local directories or archives (`src`, optional `version`, `sub_dir`)
-  - Plugin removal (`state: absent`)
+  - Removal (`state: absent`)
 - **Systemd management**: Uses OpenStack-Ansible `systemd_service` role to run Puma (`redmine.service`).
 - **Apache HTTPD & TLS**: Uses OpenStack-Ansible `httpd` + `pki` roles as reverse proxy, supporting:
   - Internal PKI self-signed/ownca certificates (default)
@@ -74,38 +74,21 @@ redmine_plugins:
 
 After installing or removing plugins, the role runs `bundle install`, `rake redmine:plugins:migrate`, `rake tmp:cache:clear`, and restarts `redmine.service`.
 
-### Plugin Installation
+### Theme Installation
 
-Configure `redmine_plugins` to install, upgrade, or remove plugins from Git repositories, remote archives, or deploy-host paths:
+Configure `redmine_themes` using the same `repo`, `url`, `src`, and `state: absent` options (`themes/` is used on Redmine ≥ 6, `public/themes/` on Redmine 5):
 
 ```yaml
-redmine_plugins:
-  # From a Git repository (init.rb must be at the repository root)
-  - name: redmine_code_review
-    repo: https://github.com/haru/redmine_code_review.git
-    version: "1.2.2" # branch, tag, or commit SHA (defaults to HEAD)
+redmine_themes:
+  - name: bleuclair
+    url: https://github.com/farend/redmine_theme_farend_bleuclair/archive/refs/tags/v2.0.3.zip
+    version: "2.0.3"
 
-  # From a remote archive (.tar.gz, .tgz, .tar.bz2, .tar.xz, .zip)
-  - name: redmine_issue_templates
-    url: https://github.com/akiko-pusu/redmine_issue_templates/archive/refs/tags/1.2.1.tar.gz
-    version: "1.2.1" # optional metadata marker to trigger re-extraction on version bump
-    # checksum: "sha256:..." # optional get_url checksum
-    # sub_dir: "redmine_issue_templates-1.2.1" # optional if not root or single top-level dir
-
-  # From a local directory or archive on the Ansible control/deploy host
-  - name: my_local_plugin
-    src: "{{ playbook_dir }}/files/my_local_plugin/"
-
-  - name: my_local_archive_plugin
-    src: "{{ playbook_dir }}/files/my_local_archive_plugin.tar.gz"
-    version: "0.1.0"
-
-  # Remove an existing plugin
-  - name: old_plugin
-    state: absent
+  - name: my_custom_theme
+    src: "{{ playbook_dir }}/files/my_custom_theme/"
 ```
 
-After installing or removing plugins, the role runs `bundle install`, `rake redmine:plugins:migrate`, `rake tmp:cache:clear`, and restarts `redmine.service`.
+After theme changes on Redmine ≥ 6, the role runs `rake assets:precompile`, `rake tmp:cache:clear`, and restarts `redmine.service`.
 
 ## Testing
 
