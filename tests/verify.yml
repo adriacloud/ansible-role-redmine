@@ -56,7 +56,7 @@
         set -euo pipefail
         export PATH="/opt/ruby/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
         export RAILS_ENV=production
-        cd /srv/redmine/redmine
+        cd /opt/redmine/redmine
         bundle exec rails runner '
           puts "VERSION=#{[Redmine::VERSION::MAJOR, Redmine::VERSION::MINOR, Redmine::VERSION::TINY].join(".")}"
           Redmine::Plugin.all.each do |p|

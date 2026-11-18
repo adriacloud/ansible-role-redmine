@@ -6,7 +6,7 @@ Ansible role to install, configure, and upgrade [Redmine](https://www.redmine.or
 
 - **Flexible Redmine version resolution**: Pin an exact version (`7.0.3`), a `major.minor` stream (`7.0`, `6.1`), a `major` stream (`7`, `6`), or `latest` — the role resolves the latest matching tarball from `redmine_releases_url` and verifies its SHA-256 checksum.
 - **Consistent Ruby runtime**: Always installs a standalone prebuilt Ruby runtime (`/opt/ruby`) mapped by Redmine major version via `redmine_ruby_version_map`, ensuring the exact same Ruby version across all supported distributions.
-- **Release-based upgrades & rollbacks**: Installs each release under `/srv/redmine/releases/redmine-<version>`, preserves `files/`, `log/`, `bundle/`, and `config/initializers/secret_token.rb` in `/srv/redmine/shared`, switches `/srv/redmine/redmine` symlink atomically, and runs `bundle install`, `db:migrate`, `redmine:plugins:migrate`, and `tmp:cache:clear` during upgrades.
+- **Release-based upgrades & rollbacks**: Installs each release under `/opt/redmine/releases/redmine-<version>`, preserves `files/`, `log/`, `bundle/`, and `config/initializers/secret_token.rb` in `/opt/redmine/shared`, switches `/opt/redmine/redmine` symlink atomically, and runs `bundle install`, `db:migrate`, `redmine:plugins:migrate`, and `tmp:cache:clear` during upgrades.
 - **Plugin management & upgrades**: Supports plugins from:
   - Git repositories (`repo`, optional `version`)
   - Remote archives (`url`, optional `version`, `checksum`, `sub_dir`)
