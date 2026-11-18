@@ -12,6 +12,10 @@ roles:
     version: master
     scm: git
     src: https://opendev.org/openstack/ansible-role-systemd_service
+  - name: galera_server
+    version: master
+    scm: git
+    src: https://opendev.org/openstack/openstack-ansible-galera_server
 collections:
   - name: ansible.mariadb
     source: https://github.com/ansible-collections/ansible.mariadb
