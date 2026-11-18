@@ -84,7 +84,7 @@ redmine_db:
   port: 3306
   database: redmine
   username: redmine
-  password: "changeme"
+  password: "{{ redmine_db_password }}"
   encoding: utf8mb4
   variables: {}
 redmine_db_migrate_force: false

@@ -35,16 +35,6 @@
             state: present
           no_log: true
 
-        - name: Create Redmine database user
-          ansible.mariadb.mariadb_user:
-            name: redmine
-            password: "{{ redmine_mariadb_password }}"
-            host: "%"
-            priv: "redmine.*:ALL"
-            append_privs: true
-            state: present
-          no_log: true
-
 - name: Installing Redmine
   hosts: redmine
   become: true
