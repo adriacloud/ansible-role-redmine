@@ -16,6 +16,13 @@
 _redmine_version: "{{ _redmine_resolved_version | default(redmine_version | string | trim) }}"
 _redmine_major_version: "{{ (_redmine_version | string).split('.')[0] }}"
 _redmine_release_path: "{{ redmine_install_dir }}"
+_redmine_themes_dir: >-
+  {{
+    (_redmine_major_version | int >= 6) | ternary(
+      _redmine_release_path ~ '/themes',
+      _redmine_release_path ~ '/public/themes'
+    )
+  }}
 _redmine_installed_version: "{{ ansible_facts.get('ansible_local', {}).get('redmine', {}).get('general', {}).get('version', '') }}"
 _redmine_default_data_loaded: "{{ ansible_facts.get('ansible_local', {}).get('redmine', {}).get('general', {}).get('default_data_loaded', false) | bool }}"
 _redmine_is_upgrade: "{{ (_redmine_installed_version | length > 0) and (_redmine_installed_version != _redmine_version) }}"

@@ -51,7 +51,7 @@
         that:
           - ansible_facts['ansible_local']['redmine']['general']['version'] == _expected_redmine_version
 
-    - name: Query Redmine version and registered plugins via Rails runner
+    - name: Query Redmine version, registered plugins, and themes via Rails runner
       ansible.builtin.shell: |
         set -euo pipefail
         export PATH="/opt/ruby/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -62,6 +62,9 @@
           Redmine::Plugin.all.each do |p|
             puts "PLUGIN=#{p.id}:#{p.version}"
           end
+          Redmine::Themes.themes.each do |t|
+            puts "THEME=#{t.id}"
+          end
         '
       args:
         executable: /bin/bash
@@ -70,12 +73,14 @@
       register: _redmine_runner_info
       changed_when: false
 
-    - name: Assert Redmine runtime version and plugins match expected state
+    - name: Assert Redmine runtime version, plugins, and themes match expected state
       ansible.builtin.assert:
         that:
           - ("VERSION=" ~ _expected_redmine_version) in _redmine_runner_info.stdout_lines
           - "'PLUGIN=redmine_test_plugin:0.0.2' in _redmine_runner_info.stdout_lines"
           - "'PLUGIN=redmine_code_review:1.2.2' in _redmine_runner_info.stdout_lines"
+          - "'THEME=redmine_test_theme' in _redmine_runner_info.stdout_lines"
+          - "'THEME=bleuclair' in _redmine_runner_info.stdout_lines"
 
     - name: Assert Redmine and Apache httpd services are running
       ansible.builtin.assert:

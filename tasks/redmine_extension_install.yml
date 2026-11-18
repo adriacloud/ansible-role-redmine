@@ -1,0 +1,261 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Remove Redmine extension when state is absent
+  when: (_ext_item.state | default('present')) == 'absent'
+  block:
+    - name: Ensure extension directory is absent
+      ansible.builtin.file:
+        path: "{{ _ext_dir }}"
+        state: absent
+      register: _ext_removed
+      notify:
+        - Restart redmine
+
+    - name: Record extension change on removal # noqa: no-handler
+      ansible.builtin.set_fact:
+        _redmine_extension_changed: true
+      when: _ext_removed is changed
+
+- name: Install or upgrade Redmine extension
+  when: (_ext_item.state | default('present')) == 'present'
+  block:
+    - name: Manage git-based Redmine extension
+      when: _ext_item.repo is defined
+      block:
+        - name: Clone or update Redmine extension git repository
+          ansible.builtin.git:
+            repo: "{{ _ext_item.repo }}"
+            dest: "{{ _ext_dir }}"
+            version: "{{ _ext_item.version | default('HEAD') }}"
+            force: true
+            update: true
+          become: true
+          become_user: "{{ redmine_system_user_name }}"
+          register: _ext_git_result
+          notify:
+            - Restart redmine
+
+        - name: Record extension change for git repository # noqa: no-handler
+          ansible.builtin.set_fact:
+            _redmine_extension_changed: true
+          when: _ext_git_result is changed
+
+    - name: Manage archive-based Redmine extension
+      when:
+        - _ext_item.repo is not defined
+        - (_ext_item.url is defined) or ((_ext_item.src is defined) and ((_ext_item.src | string) is match('.*\.(tar\.gz|tgz|tar\.bz2|tar\.xz|zip)$')))
+      vars:
+        _ext_url_archive_dest: >-
+          {{
+            _ext_cache_dir ~ '/'
+            ~ _ext_item.name ~ '-' ~ ((_ext_item.url | default('')) | hash('sha1'))[:8]
+            ~ '-' ~ ((_ext_item.url | default('')) | basename)
+          }}
+      block:
+        - name: Download remote extension archive
+          ansible.builtin.get_url:
+            url: "{{ _ext_item.url }}"
+            dest: "{{ _ext_url_archive_dest }}"
+            checksum: "{{ _ext_item.checksum | default(omit) }}"
+            mode: "0644"
+            validate_certs: "{{ redmine_download_validate_certs }}"
+          register: _ext_url_dl
+          until: _ext_url_dl is success
+          retries: 3
+          delay: 5
+          when: _ext_item.url is defined
+
+        - name: Copy deploy-host extension archive
+          ansible.builtin.copy:
+            src: "{{ _ext_item.src }}"
+            dest: "{{ _ext_cache_dir }}/{{ _ext_item.name }}_{{ _ext_item.src | basename }}"
+            mode: "0644"
+          register: _ext_src_archive
+          when:
+            - _ext_item.url is not defined
+            - _ext_item.src is defined
+
+        - name: Stat extension directory and metadata marker
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ _ext_dir }}"
+            - "{{ _ext_dir }}/{{ _ext_meta_file }}"
+          register: _ext_archive_stats
+
+        - name: Read existing extension metadata marker
+          ansible.builtin.slurp:
+            src: "{{ _ext_dir }}/{{ _ext_meta_file }}"
+          register: _ext_meta_slurp
+          when: _ext_archive_stats.results[1].stat.exists
+
+        - name: Extract and install archive extension
+          when: _ext_needs_extract | bool
+          vars:
+            _ext_archive_src: >-
+              {{
+                (_ext_item.url is defined) | ternary(
+                  _ext_url_archive_dest,
+                  _ext_src_archive.dest | default('')
+                )
+              }}
+            _ext_archive_changed: >-
+              {{
+                (_ext_item.url is defined) | ternary(
+                  _ext_url_dl is changed,
+                  _ext_src_archive is changed
+                )
+              }}
+            _ext_expected_meta: >-
+              {{
+                (_ext_item.url is defined) | ternary(
+                  {
+                    'url': _ext_item.url | default(''),
+                    'version': _ext_item.version | default(''),
+                    'sub_dir': _ext_item.sub_dir | default('')
+                  },
+                  {
+                    'src': _ext_item.src | default(''),
+                    'version': _ext_item.version | default(''),
+                    'sub_dir': _ext_item.sub_dir | default(''),
+                    'checksum': _ext_src_archive.checksum | default('')
+                  }
+                ) | to_json
+              }}
+            _ext_needs_extract: >-
+              {{
+                (not _ext_archive_stats.results[0].stat.exists)
+                or (_ext_archive_changed | bool)
+                or (not _ext_archive_stats.results[1].stat.exists)
+                or ((_ext_meta_slurp.content | b64decode | trim) != (_ext_expected_meta | trim))
+              }}
+            _ext_extract_tmp: "{{ _ext_cache_dir }}/_extract_{{ _ext_item.name }}"
+          block:
+            - name: Clean temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _ext_extract_tmp }}"
+                state: absent
+
+            - name: Create temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _ext_extract_tmp }}"
+                state: directory
+                mode: "0755"
+
+            - name: Unpack extension archive
+              ansible.builtin.unarchive:
+                src: "{{ _ext_archive_src }}"
+                dest: "{{ _ext_extract_tmp }}"
+                remote_src: true
+
+            - name: Check for root marker at archive root
+              ansible.builtin.stat:
+                path: "{{ _ext_extract_tmp }}/{{ _ext_root_marker }}"
+              register: _ext_root_marker_stat
+
+            - name: Find top-level directories in extracted archive
+              ansible.builtin.find:
+                paths: "{{ _ext_extract_tmp }}"
+                file_type: directory
+                depth: 1
+              register: _ext_top_dirs
+
+            - name: Remove existing extension directory before replacement
+              ansible.builtin.file:
+                path: "{{ _ext_dir }}"
+                state: absent
+
+            - name: Create target extension directory
+              ansible.builtin.file:
+                path: "{{ _ext_dir }}"
+                state: directory
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: "0755"
+
+            - name: Copy normalized extension files into target directory
+              vars:
+                _ext_resolved_root: >-
+                  {{
+                    (_ext_item.sub_dir | default('') | length > 0) | ternary(
+                      _ext_extract_tmp ~ '/' ~ (_ext_item.sub_dir | default('')),
+                      (_ext_root_marker_stat.stat.exists) | ternary(
+                        _ext_extract_tmp,
+                        ((_ext_top_dirs.files | length) == 1) | ternary(
+                          (_ext_top_dirs.files | first | default({})).path | default(_ext_extract_tmp),
+                          _ext_extract_tmp
+                        )
+                      )
+                    )
+                  }}
+              ansible.builtin.copy:
+                src: "{{ _ext_resolved_root }}/"
+                dest: "{{ _ext_dir }}/"
+                remote_src: true
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: preserve
+              notify:
+                - Restart redmine
+
+            - name: Write extension metadata marker
+              ansible.builtin.copy:
+                content: "{{ _ext_expected_meta }}\n"
+                dest: "{{ _ext_dir }}/{{ _ext_meta_file }}"
+                owner: "{{ redmine_system_user_name }}"
+                group: "{{ redmine_system_group_name }}"
+                mode: "0644"
+
+            - name: Remove temporary extraction path
+              ansible.builtin.file:
+                path: "{{ _ext_extract_tmp }}"
+                state: absent
+
+            - name: Record extension change for archive
+              ansible.builtin.set_fact:
+                _redmine_extension_changed: true
+
+    - name: Manage deploy-host directory Redmine extension
+      when:
+        - _ext_item.repo is not defined
+        - _ext_item.url is not defined
+        - _ext_item.src is defined
+        - (_ext_item.src | string) is not match('.*\.(tar\.gz|tgz|tar\.bz2|tar\.xz|zip)$')
+      block:
+        - name: Ensure target extension directory exists
+          ansible.builtin.file:
+            path: "{{ _ext_dir }}"
+            state: directory
+            owner: "{{ redmine_system_user_name }}"
+            group: "{{ redmine_system_group_name }}"
+            mode: "0755"
+
+        - name: Copy extension directory from deploy host
+          ansible.builtin.copy:
+            src: "{{ (_ext_item.src | string).endswith('/') | ternary(_ext_item.src, _ext_item.src ~ '/') }}"
+            dest: "{{ _ext_dir }}/"
+            owner: "{{ redmine_system_user_name }}"
+            group: "{{ redmine_system_group_name }}"
+            directory_mode: "0755"
+            mode: preserve
+          register: _ext_src_dir
+          notify:
+            - Restart redmine
+
+        - name: Record extension change for deploy-host directory # noqa: no-handler
+          ansible.builtin.set_fact:
+            _redmine_extension_changed: true
+          when: _ext_src_dir is changed

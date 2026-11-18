@@ -15,14 +15,21 @@
 
 - name: Initialize plugin change tracking flag
   ansible.builtin.set_fact:
-    _redmine_plugins_changed: false
+    _redmine_extension_changed: false
 
 - name: Process configured Redmine plugins
   ansible.builtin.include_tasks:
-    file: redmine_plugin_install.yml
+    file: redmine_extension_install.yml
   loop: "{{ redmine_plugins }}"
   loop_control:
-    loop_var: _plugin
-    label: "{{ _plugin.name }}"
+    loop_var: _ext_item
+    label: "{{ _ext_item.name }}"
   vars:
-    _plugin_dir: "{{ _redmine_release_path }}/plugins/{{ _plugin.name }}"
+    _ext_dir: "{{ _redmine_release_path }}/plugins/{{ _ext_item.name }}"
+    _ext_cache_dir: "{{ redmine_shared_dir }}/plugins_cache"
+    _ext_root_marker: "init.rb"
+    _ext_meta_file: ".ansible_plugin_meta"
+
+- name: Record Redmine plugin change flag
+  ansible.builtin.set_fact:
+    _redmine_plugins_changed: "{{ _redmine_extension_changed | bool }}"

@@ -1,0 +1,6 @@
+/* Test theme for ansible-role-redmine Molecule verification */
+@import url("../../../stylesheets/application.css");
+
+#header {
+  border-bottom: 2px solid #2c3e50;
+}
