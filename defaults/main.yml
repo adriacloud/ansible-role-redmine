@@ -52,11 +52,12 @@ redmine_ruby_runtime_dir: /opt/ruby
 redmine_ruby_version: "{{ redmine_ruby_version_map[_redmine_major_version] | default('3.4.12') }}"
 redmine_ruby_install_dir: "/opt/ruby-{{ redmine_ruby_version }}"
 redmine_ruby_prebuilt_arch_map:
-  x86_64: x86_64_linux
-  amd64: x86_64_linux
-  aarch64: arm64_linux
-  arm64: arm64_linux
-_redmine_ruby_prebuilt_arch: "{{ redmine_ruby_prebuilt_arch_map[ansible_facts['architecture']] | default('x86_64_linux') }}"
+  x86_64: x86_64
+  amd64: x86_64
+  aarch64: arm64
+  arm64: arm64
+_redmine_ruby_prebuilt_arch: >-
+  {{ redmine_ruby_prebuilt_arch_map[ansible_facts['architecture']] | default('x86_64') ~ '_' ~ ansible_facts['os_family'] }}
 redmine_ruby_prebuilt_url: >-
   https://github.com/jdx/ruby/releases/download/{{ redmine_ruby_version }}/ruby-{{
   redmine_ruby_version }}.{{ _redmine_ruby_prebuilt_arch }}.tar.gz
