@@ -39,7 +39,7 @@ redmine_extra_packages: []
 redmine_system_user_name: redmine
 redmine_system_group_name: redmine
 redmine_service_name: redmine
-redmine_base_dir: /srv/redmine
+redmine_base_dir: /opt/redmine
 redmine_releases_dir: "{{ redmine_base_dir }}/releases"
 redmine_install_dir: "{{ redmine_releases_dir }}/redmine-{{ _redmine_version }}"
 redmine_shared_dir: "{{ redmine_base_dir }}/shared"
