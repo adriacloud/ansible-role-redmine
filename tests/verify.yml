@@ -65,6 +65,7 @@
           Redmine::Themes.themes.each do |t|
             puts "THEME=#{t.id}"
           end
+          puts "EXTRA_ENV_CONFIG=#{Rails.application.config.x.ansible_role_redmine_test}"
         '
       args:
         executable: /bin/bash
@@ -81,6 +82,32 @@
           - "'PLUGIN=redmine_code_review:1.2.2' in _redmine_runner_info.stdout_lines"
           - "'THEME=redmine_test_theme' in _redmine_runner_info.stdout_lines"
           - "'THEME=bleuclair' in _redmine_runner_info.stdout_lines"
+          - "'EXTRA_ENV_CONFIG=true' in _redmine_runner_info.stdout_lines"
+
+    - name: Stat custom shared directory, extra files, and lifecycle hook output
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/redmine/redmine/custom_shared
+        - /opt/redmine/redmine/custom_shared/hook_ran
+        - /opt/redmine/redmine/config/initializers/ansible_test.rb
+        - /opt/redmine/redmine/config/ansible_test.yml
+      register: _redmine_extra_stats
+
+    - name: Inspect Redmine systemd service environment  # noqa: command-instead-of-module
+      ansible.builtin.command: systemctl show redmine.service -p Environment
+      register: _redmine_service_env_show
+      changed_when: false
+
+    - name: Assert custom shared dirs, extra files, lifecycle hooks, and service env
+      ansible.builtin.assert:
+        that:
+          - _redmine_extra_stats.results[0].stat.islnk
+          - _redmine_extra_stats.results[1].stat.exists
+          - _redmine_extra_stats.results[2].stat.exists
+          - _redmine_extra_stats.results[3].stat.exists
+          - ansible_facts['ansible_local']['redmine']['hooks']['molecule_hook_ran'] | default(false) | bool
+          - "'REDMINE_TEST_ENV=configured' in _redmine_service_env_show.stdout"
 
     - name: Assert Redmine and Apache httpd services are running
       ansible.builtin.assert:

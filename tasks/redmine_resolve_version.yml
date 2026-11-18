@@ -29,6 +29,34 @@
   loop_control:
     label: "{{ item._var }}:{{ item.name | default('unnamed') }}"
 
+- name: Validate redmine_extra_files definitions
+  ansible.builtin.assert:
+    that:
+      - item.dest is defined
+      - item.dest | length > 0
+      - (item.state | default('present') == 'absent') or (item.content is defined or item.yaml is defined or item.src is defined)
+    fail_msg: >-
+      Each item in redmine_extra_files must define 'dest' and at least one of 'content', 'yaml', or 'src' (unless state is 'absent').
+  loop: "{{ redmine_extra_files }}"
+  loop_control:
+    label: "{{ item.dest | default('unnamed') }}"
+
+- name: Validate lifecycle command definitions
+  ansible.builtin.assert:
+    that:
+      - item.command is defined
+      - item.command | length > 0
+    fail_msg: "Each lifecycle command item must define a non-empty 'command'."
+  loop: "{{ redmine_pre_migrate_commands + redmine_post_migrate_commands }}"
+  loop_control:
+    label: "{{ item.name | default(item.command | default('unnamed')) }}"
+
+- name: Validate redmine_extra_rb_environment is a mapping
+  ansible.builtin.assert:
+    that:
+      - redmine_extra_rb_environment is mapping
+    fail_msg: "redmine_extra_rb_environment must be a mapping of snippet names to Ruby code."
+
 - name: Discover latest matching Redmine release when exact patch version is not given
   when: (redmine_version | string | trim) is not match('^\d+\.\d+\.\d+$')
   block:

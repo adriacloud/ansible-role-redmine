@@ -22,3 +22,22 @@ redmine_themes:
   - name: bleuclair
     url: https://github.com/farend/redmine_theme_farend_bleuclair/archive/refs/tags/v2.0.3.zip
     version: "2.0.3"
+redmine_extra_env:
+  REDMINE_TEST_ENV: "configured"
+redmine_extra_shared_dirs:
+  - custom_shared
+redmine_extra_rb_environment:
+  molecule_test: |
+    config.x.ansible_role_redmine_test = true
+  molecule_disabled: ""
+redmine_extra_files:
+  - dest: config/initializers/ansible_test.rb
+    content: |
+      # Managed by ansible-role-redmine Molecule test
+  - dest: config/ansible_test.yml
+    yaml:
+      test_key: test_value
+redmine_post_migrate_commands:
+  - name: Create post-migrate hook marker
+    command: "touch {{ redmine_shared_dir }}/custom_shared/hook_ran"
+    fact_key: molecule_hook_ran

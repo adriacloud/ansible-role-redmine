@@ -20,9 +20,11 @@
     owner: "{{ redmine_system_user_name }}"
     group: "{{ redmine_system_group_name }}"
     mode: "0640"
+  no_log: "{{ item.no_log | default(false) }}"
   loop:
     - content: "{{ _redmine_db_configuration | to_nice_yaml(indent=2) }}"
       dest: "{{ _redmine_release_path }}/config/database.yml"
+      no_log: true
     - content: "{{ _redmine_configuration | to_nice_yaml(indent=2) }}"
       dest: "{{ _redmine_release_path }}/config/configuration.yml"
   notify:
@@ -42,3 +44,76 @@
       dest: "{{ _redmine_release_path }}/config/puma.rb"
   notify:
     - Restart redmine
+
+- name: Render Redmine additional_environment.rb
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible
+      {{ _redmine_extra_rb_environment_blocks | join('\n\n') }}
+    dest: "{{ _redmine_release_path }}/config/additional_environment.rb"
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0644"
+  when: _redmine_extra_rb_environment_blocks | length > 0
+  notify:
+    - Restart redmine
+
+- name: Manage extra Redmine files
+  when: redmine_extra_files | length > 0
+  block:
+    - name: Remove extra Redmine files marked absent
+      ansible.builtin.file:
+        path: "{{ (item.dest.startswith('/')) | ternary(item.dest, _redmine_release_path ~ '/' ~ item.dest) }}"
+        state: absent
+      loop: "{{ redmine_extra_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
+      when: (item.state | default('present')) == 'absent'
+      notify:
+        - Restart redmine
+
+    - name: Ensure parent directories exist for extra Redmine files
+      ansible.builtin.file:
+        path: "{{ ((item.dest.startswith('/')) | ternary(item.dest, _redmine_release_path ~ '/' ~ item.dest)) | dirname }}"
+        state: directory
+        owner: "{{ item.owner | default(redmine_system_user_name) }}"
+        group: "{{ item.group | default(redmine_system_group_name) }}"
+        mode: "0755"
+      loop: "{{ redmine_extra_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
+      when: (item.state | default('present')) == 'present'
+
+    - name: Render inline or YAML extra Redmine files
+      ansible.builtin.copy:
+        content: "{{ (item.yaml | to_nice_yaml(indent=2)) if (item.yaml is defined) else (item.content | default('')) }}"
+        dest: "{{ (item.dest.startswith('/')) | ternary(item.dest, _redmine_release_path ~ '/' ~ item.dest) }}"
+        owner: "{{ item.owner | default(redmine_system_user_name) }}"
+        group: "{{ item.group | default(redmine_system_group_name) }}"
+        mode: "{{ item.mode | default('0640') }}"
+      loop: "{{ redmine_extra_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
+      when:
+        - (item.state | default('present')) == 'present'
+        - (item.content is defined) or (item.yaml is defined)
+      notify:
+        - Restart redmine
+
+    - name: Copy file-based extra Redmine files
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ (item.dest.startswith('/')) | ternary(item.dest, _redmine_release_path ~ '/' ~ item.dest) }}"
+        owner: "{{ item.owner | default(redmine_system_user_name) }}"
+        group: "{{ item.group | default(redmine_system_group_name) }}"
+        mode: "{{ item.mode | default('0640') }}"
+      loop: "{{ redmine_extra_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
+      when:
+        - (item.state | default('present')) == 'present'
+        - item.content is not defined
+        - item.yaml is not defined
+        - item.src is defined
+      notify:
+        - Restart redmine
