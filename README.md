@@ -1,5 +1,10 @@
 # ansible-role-redmine
 
+[![Molecule](https://github.com/adriacloud/ansible-role-redmine/actions/workflows/molecule.yml/badge.svg)](https://github.com/adriacloud/ansible-role-redmine/actions/workflows/molecule.yml)
+[![Unit Tests](https://github.com/adriacloud/ansible-role-redmine/actions/workflows/linters.yml/badge.svg)](https://github.com/adriacloud/ansible-role-redmine/actions/workflows/linters.yml)
+
+
+
 Ansible role to install, configure, and upgrade [Redmine](https://www.redmine.org/) on Debian, Ubuntu, and Enterprise Linux (EL 10) systems.
 
 ## Features
