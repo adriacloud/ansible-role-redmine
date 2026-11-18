@@ -39,9 +39,7 @@
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   register: _redmine_bundle_check
   changed_when: false
   failed_when: false
@@ -52,9 +50,7 @@
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   register: _redmine_bundle_install
   changed_when: true
   when: _redmine_bundle_check.rc != 0
@@ -70,9 +66,7 @@
         chdir: "{{ _redmine_release_path }}"
       become: true
       become_user: "{{ redmine_system_user_name }}"
-      environment:
-        RAILS_ENV: "{{ redmine_rails_env }}"
-        PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      environment: "{{ _redmine_rake_env }}"
       changed_when: true
 
     - name: Copy generated secret_token.rb to shared config
@@ -93,17 +87,31 @@
         group: "{{ redmine_system_group_name }}"
         force: true
 
+- name: Initialize pre-migrate lifecycle change flag
+  ansible.builtin.set_fact:
+    _redmine_lifecycle_changed: false
+
+- name: Run Redmine pre-migrate lifecycle commands
+  ansible.builtin.include_tasks:
+    file: redmine_lifecycle_commands.yml
+  loop: "{{ redmine_pre_migrate_commands }}"
+  loop_control:
+    loop_var: _hook
+    label: "{{ _hook.name | default(_hook.command) }}"
+
+- name: Record pre-migrate lifecycle change flag
+  ansible.builtin.set_fact:
+    _redmine_pre_migrate_changed: "{{ _redmine_lifecycle_changed | bool }}"
+
 - name: Run Redmine database migrations
   ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake db:migrate"
   args:
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   changed_when: true
-  when: _redmine_needs_db_migrate | bool
+  when: (_redmine_needs_db_migrate | bool) or (_redmine_pre_migrate_changed | default(false) | bool)
   notify:
     - Restart redmine
 
@@ -118,10 +126,7 @@
         chdir: "{{ _redmine_release_path }}"
       become: true
       become_user: "{{ redmine_system_user_name }}"
-      environment:
-        RAILS_ENV: "{{ redmine_rails_env }}"
-        REDMINE_LANG: "{{ redmine_language }}"
-        PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      environment: "{{ _redmine_rake_env | combine({'REDMINE_LANG': redmine_language}) }}"
       changed_when: true
 
     - name: Record default data loaded in local facts
@@ -138,9 +143,7 @@
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   changed_when: true
   when:
     - redmine_plugins | length > 0
@@ -148,15 +151,25 @@
   notify:
     - Restart redmine
 
+- name: Initialize post-migrate lifecycle change flag
+  ansible.builtin.set_fact:
+    _redmine_lifecycle_changed: false
+
+- name: Run Redmine post-migrate lifecycle commands
+  ansible.builtin.include_tasks:
+    file: redmine_lifecycle_commands.yml
+  loop: "{{ redmine_post_migrate_commands }}"
+  loop_control:
+    loop_var: _hook
+    label: "{{ _hook.name | default(_hook.command) }}"
+
 - name: Precompile Redmine assets on upgrade, plugin, or theme change
   ansible.builtin.command: "{{ _redmine_ruby_bin_dir }}/bundle exec rake assets:precompile"
   args:
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   changed_when: true
   when:
     - _redmine_major_version | int >= 6
@@ -170,9 +183,7 @@
     chdir: "{{ _redmine_release_path }}"
   become: true
   become_user: "{{ redmine_system_user_name }}"
-  environment:
-    RAILS_ENV: "{{ redmine_rails_env }}"
-    PATH: "{{ _redmine_ruby_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  environment: "{{ _redmine_rake_env }}"
   changed_when: true
   when: (_redmine_is_upgrade | bool) or (_redmine_plugins_changed | default(false) | bool) or (_redmine_themes_changed | default(false) | bool)
   notify:

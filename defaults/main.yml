@@ -104,6 +104,20 @@ redmine_language: en
 redmine_smtp_settings: {}
 redmine_configuration: {}
 
+# Optional Rails customization, extra files, environment variables, shared dirs, and lifecycle hooks
+# Extra environment variables passed to the Redmine systemd service and Rake/Bundler commands
+redmine_extra_env: {}
+# Ruby code written to config/additional_environment.rb as named blocks (empty/null entries are skipped)
+redmine_extra_rb_environment: {}
+# Additional directories created under redmine_shared_dir and symlinked into each release
+redmine_extra_shared_dirs: []
+# Extra files rendered into the Redmine release (each item needs `dest` and `content`, `yaml`, or `src`)
+redmine_extra_files: []
+# Lifecycle commands executed inside the release directory before db:migrate / after redmine:plugins:migrate
+# Each item requires `command` and optionally `name`, `fact_key`, `creates`, `check_command`, `notify_restart`
+redmine_pre_migrate_commands: []
+redmine_post_migrate_commands: []
+
 # Redmine plugins list
 # Each entry requires `name` and either `repo` (git), `url` (archive), or `src` (deploy-host path/archive).
 # Set `state: absent` to remove a plugin.

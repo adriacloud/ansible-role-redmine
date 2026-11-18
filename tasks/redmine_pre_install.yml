@@ -80,3 +80,12 @@
     mode: "0750"
   when:
     - _redmine_db['adapter'] == 'sqlite3'
+
+- name: Create extra persistent shared directories
+  ansible.builtin.file:
+    path: "{{ redmine_shared_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0755"
+  loop: "{{ redmine_extra_shared_dirs }}"

@@ -90,6 +90,42 @@ redmine_themes:
 
 After theme changes on Redmine ≥ 6, the role runs `rake assets:precompile`, `rake tmp:cache:clear`, and restarts `redmine.service`.
 
+### Custom Environment, Files, Shared Directories, and Lifecycle Hooks
+
+For plugins or deployments that require extra Rails configuration, persistent directories, environment variables, or one-time setup tasks (such as Active Storage for `redmine_dmsf` 5.x, sub-URI mounts, or custom initializers), the role provides:
+
+- `redmine_extra_env`: Dictionary of extra environment variables passed to both `redmine.service` and Bundler/Rake tasks.
+- `redmine_extra_rb_environment`: Mapping of named Ruby snippets rendered (sorted by key, skipping empty/null entries) into `config/additional_environment.rb`.
+- `redmine_extra_shared_dirs`: Directories created under `redmine_shared_dir` and symlinked into each release.
+- `redmine_extra_files`: Extra files rendered into the release (`dest`, plus `content`, `yaml`, or `src`, and optional `mode`, `owner`, `group`, `state`).
+- `redmine_pre_migrate_commands` / `redmine_post_migrate_commands`: Commands run inside the release directory before `db:migrate` or after `redmine:plugins:migrate` (`command`, plus optional `name`, `fact_key`, `creates`, `check_command`, `notify_restart`).
+
+#### Example: Enabling Active Storage (e.g., for `redmine_dmsf` 5.x)
+
+```yaml
+redmine_extra_shared_dirs:
+  - dmsf_as
+
+redmine_extra_rb_environment:
+  active_storage: |
+    require 'active_storage/engine'
+    require Rails.root.join('plugins', 'redmine_dmsf', 'lib', 'redmine_dmsf', 'xapian_analyzer').to_s
+    config.active_storage.service = :local
+    config.active_storage.analyzers.append RedmineDmsf::XapianAnalyzer
+
+redmine_extra_files:
+  - dest: config/storage.yml
+    yaml:
+      local:
+        service: Disk
+        root: "{{ redmine_shared_dir }}/dmsf_as"
+
+redmine_pre_migrate_commands:
+  - name: Install Active Storage migrations
+    command: bundle exec rails active_storage:install
+    fact_key: active_storage_installed
+```
+
 ## Testing
 
 Tests use Tox and Molecule with Docker:

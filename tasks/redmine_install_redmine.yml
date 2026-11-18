@@ -41,10 +41,7 @@
 - name: Stat shared-linked directories in Redmine release
   ansible.builtin.stat:
     path: "{{ _redmine_release_path }}/{{ item }}"
-  loop:
-    - files
-    - log
-    - public/plugin_assets
+  loop: "{{ _redmine_linked_shared_dirs }}"
   register: _redmine_release_dir_stats
 
 - name: Remove non-symlink default directories before symlinking shared paths
@@ -58,6 +55,16 @@
     - item.stat.exists
     - not item.stat.islnk
 
+- name: Ensure parent directories exist for nested shared symlinks
+  ansible.builtin.file:
+    path: "{{ (_redmine_release_path ~ '/' ~ item) | dirname }}"
+    state: directory
+    owner: "{{ redmine_system_user_name }}"
+    group: "{{ redmine_system_group_name }}"
+    mode: "0755"
+  loop: "{{ _redmine_linked_shared_dirs }}"
+  when: "'/' in item"
+
 - name: Symlink persistent shared directories into release directory
   ansible.builtin.file:
     src: "{{ redmine_shared_dir }}/{{ item }}"
@@ -65,10 +72,7 @@
     state: link
     owner: "{{ redmine_system_user_name }}"
     group: "{{ redmine_system_group_name }}"
-  loop:
-    - files
-    - log
-    - public/plugin_assets
+  loop: "{{ _redmine_linked_shared_dirs }}"
 
 - name: Check whether shared secret_token.rb exists
   ansible.builtin.stat:

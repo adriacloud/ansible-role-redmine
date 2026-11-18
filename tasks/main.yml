@@ -95,10 +95,7 @@
             Group: "{{ redmine_system_group_name }}"
             WorkingDirectory: "{{ redmine_runtime_directory }}"
             SyslogIdentifier: "{{ redmine_service_name }}"
-        environment:
-          RAILS_ENV: "{{ redmine_rails_env }}"
-          RAILS_SERVE_STATIC_FILES: "true"
-          PATH: "{{ _redmine_ruby_runtime_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        environment: "{{ _redmine_service_env }}"
         execstarts:
           - "{{ _redmine_ruby_runtime_bin_dir }}/bundle exec puma -C {{ redmine_runtime_directory }}/config/puma.rb"
         enabled: true

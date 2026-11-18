@@ -69,6 +69,33 @@ _redmine_httpd_vhost_ssl: >-
   }}
 _redmine_ruby_bin_dir: "{{ redmine_ruby_install_dir }}/bin"
 _redmine_ruby_runtime_bin_dir: "{{ redmine_ruby_runtime_dir }}/bin"
+_redmine_linked_shared_dirs: "{{ ['files', 'log', 'public/plugin_assets'] + redmine_extra_shared_dirs }}"
+_redmine_extra_rb_environment_blocks: >-
+  {{
+    redmine_extra_rb_environment
+    | dict2items
+    | sort(attribute='key')
+    | rejectattr('value', 'none')
+    | map(attribute='value')
+    | map('trim')
+    | reject('equalto', '')
+    | list
+  }}
+_redmine_rake_env: >-
+  {{
+    {
+      'RAILS_ENV': redmine_rails_env,
+      'PATH': _redmine_ruby_bin_dir ~ ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    } | combine(redmine_extra_env)
+  }}
+_redmine_service_env: >-
+  {{
+    {
+      'RAILS_ENV': redmine_rails_env,
+      'RAILS_SERVE_STATIC_FILES': 'true',
+      'PATH': _redmine_ruby_runtime_bin_dir ~ ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    } | combine(redmine_extra_env)
+  }}
 _redmine_smtp_configuration: >-
   {{
     (redmine_smtp_settings | length > 0) | ternary(

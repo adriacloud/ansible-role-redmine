@@ -1,0 +1,97 @@
+---
+# Copyright 2026, Adria Cloud Services.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- name: Evaluate lifecycle command preconditions
+  vars:
+    _hook_fact_done: >-
+      {{
+        (_hook.fact_key is defined)
+        and (
+          ansible_facts.get('ansible_local', {})
+          .get('redmine', {})
+          .get('hooks', {})
+          .get(_hook.fact_key, false) | bool
+        )
+      }}
+    _hook_creates_path: >-
+      {{
+        (_hook.creates is defined) | ternary(
+          ((_hook.creates | default('') | string).startswith('/')) | ternary(
+            _hook.creates | default(''),
+            _redmine_release_path ~ '/' ~ (_hook.creates | default(''))
+          ),
+          ''
+        )
+      }}
+  when: not (_hook_fact_done | bool)
+  block:
+    - name: Stat creates marker for lifecycle command
+      ansible.builtin.stat:
+        path: "{{ _hook_creates_path }}"
+      register: _hook_creates_stat
+      when: _hook.creates is defined
+
+    - name: Run check_command for lifecycle command
+      ansible.builtin.command: "{{ _hook.check_command }}"
+      args:
+        chdir: "{{ _redmine_release_path }}"
+      become: true
+      become_user: "{{ redmine_system_user_name }}"
+      environment: "{{ _redmine_rake_env }}"
+      register: _hook_check
+      changed_when: false
+      failed_when: false
+      when:
+        - _hook.check_command is defined
+        - (_hook.creates is not defined) or (not (_hook_creates_stat.stat.exists | default(false)))
+
+    - name: Execute lifecycle command
+      ansible.builtin.command: "{{ _hook.command }}"
+      args:
+        chdir: "{{ _redmine_release_path }}"
+      become: true
+      become_user: "{{ redmine_system_user_name }}"
+      environment: "{{ _redmine_rake_env }}"
+      register: _hook_exec
+      changed_when: true
+      when:
+        - (_hook.creates is not defined) or (not (_hook_creates_stat.stat.exists | default(false)))
+        - (_hook.check_command is not defined) or (_hook_check.rc | default(1) != 0)
+
+    - name: Record lifecycle command change flag # noqa: no-handler
+      ansible.builtin.set_fact:
+        _redmine_lifecycle_changed: true
+      when: _hook_exec is changed
+
+    - name: Trigger Redmine restart after lifecycle command # noqa: no-handler
+      ansible.builtin.debug:
+        msg: "Lifecycle command changed state; scheduling Redmine restart"
+      changed_when: true
+      when:
+        - _hook_exec is changed
+        - _hook.notify_restart | default(true) | bool
+      notify:
+        - Restart redmine
+
+    - name: Record lifecycle command fact marker # noqa: no-handler
+      community.general.ini_file:
+        path: /etc/ansible/facts.d/redmine.fact
+        section: hooks
+        option: "{{ _hook.fact_key }}"
+        value: "true"
+        mode: "0644"
+      when:
+        - _hook.fact_key is defined
+        - _hook_exec is changed
