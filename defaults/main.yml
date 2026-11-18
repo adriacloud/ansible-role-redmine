@@ -57,7 +57,7 @@ redmine_ruby_prebuilt_arch_map:
   aarch64: arm64
   arm64: arm64
 _redmine_ruby_prebuilt_arch: >-
-  {{ redmine_ruby_prebuilt_arch_map[ansible_facts['architecture']] | default('x86_64') ~ '_' ~ ansible_facts['os_family'] }}
+  {{ redmine_ruby_prebuilt_arch_map[ansible_facts['architecture']] | default('x86_64') ~ '_' ~ ansible_facts['system'] | lower }}
 redmine_ruby_prebuilt_url: >-
   https://github.com/jdx/ruby/releases/download/{{ redmine_ruby_version }}/ruby-{{
   redmine_ruby_version }}.{{ _redmine_ruby_prebuilt_arch }}.tar.gz
