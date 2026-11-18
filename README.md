@@ -41,6 +41,72 @@ See [defaults/main.yml](defaults/main.yml) for the complete list and documentati
 
 See [examples/playbook.yml](examples/playbook.yml).
 
+### Plugin Installation
+
+Configure `redmine_plugins` to install, upgrade, or remove plugins from Git repositories, remote archives, or deploy-host paths:
+
+```yaml
+redmine_plugins:
+  # From a Git repository (init.rb must be at the repository root)
+  - name: redmine_code_review
+    repo: https://github.com/haru/redmine_code_review.git
+    version: "1.2.2" # branch, tag, or commit SHA (defaults to HEAD)
+
+  # From a remote archive (.tar.gz, .tgz, .tar.bz2, .tar.xz, .zip)
+  - name: redmine_issue_templates
+    url: https://github.com/agileware-jp/redmine_issue_templates/archive/refs/tags/v1.2.3.tar.gz
+    version: "1.2.3" # optional metadata marker to trigger re-extraction on version bump
+    # checksum: "sha256:..." # optional get_url checksum
+    # sub_dir: "redmine_issue_templates-1.2.1" # optional if not root or single top-level dir
+
+  # From a local directory or archive on the Ansible control/deploy host
+  - name: my_local_plugin
+    src: "{{ playbook_dir }}/files/my_local_plugin/"
+
+  - name: my_local_archive_plugin
+    src: "{{ playbook_dir }}/files/my_local_archive_plugin.tar.gz"
+    version: "0.1.0"
+
+  # Remove an existing plugin
+  - name: old_plugin
+    state: absent
+```
+
+After installing or removing plugins, the role runs `bundle install`, `rake redmine:plugins:migrate`, `rake tmp:cache:clear`, and restarts `redmine.service`.
+
+### Plugin Installation
+
+Configure `redmine_plugins` to install, upgrade, or remove plugins from Git repositories, remote archives, or deploy-host paths:
+
+```yaml
+redmine_plugins:
+  # From a Git repository (init.rb must be at the repository root)
+  - name: redmine_code_review
+    repo: https://github.com/haru/redmine_code_review.git
+    version: "1.2.2" # branch, tag, or commit SHA (defaults to HEAD)
+
+  # From a remote archive (.tar.gz, .tgz, .tar.bz2, .tar.xz, .zip)
+  - name: redmine_issue_templates
+    url: https://github.com/akiko-pusu/redmine_issue_templates/archive/refs/tags/1.2.1.tar.gz
+    version: "1.2.1" # optional metadata marker to trigger re-extraction on version bump
+    # checksum: "sha256:..." # optional get_url checksum
+    # sub_dir: "redmine_issue_templates-1.2.1" # optional if not root or single top-level dir
+
+  # From a local directory or archive on the Ansible control/deploy host
+  - name: my_local_plugin
+    src: "{{ playbook_dir }}/files/my_local_plugin/"
+
+  - name: my_local_archive_plugin
+    src: "{{ playbook_dir }}/files/my_local_archive_plugin.tar.gz"
+    version: "0.1.0"
+
+  # Remove an existing plugin
+  - name: old_plugin
+    state: absent
+```
+
+After installing or removing plugins, the role runs `bundle install`, `rake redmine:plugins:migrate`, `rake tmp:cache:clear`, and restarts `redmine.service`.
+
 ## Testing
 
 Tests use Tox and Molecule with Docker:

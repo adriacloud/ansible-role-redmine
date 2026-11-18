@@ -10,9 +10,12 @@
     galera_root_password: "super-secret-root-password"
     redmine_db_password: "changeme"
   tasks:
-    - name: Run galera_server role when enabled
+    - name: Run galera_server role when enabled  # noqa: var-naming[no-role-prefix]
       ansible.builtin.include_role:
         name: galera_server
+      vars:
+        galera_install_server: "{{ redmine_deploy_galera | default(true) }}"
+        galera_install_client: "{{ redmine_deploy_galera | default(true) }}"
       when: redmine_deploy_galera | default(true) | bool
 
     - name: Create Redmine database and user
@@ -38,33 +41,5 @@
 - name: Installing Redmine
   hosts: redmine
   become: true
-  vars:
-    redmine_version: "7"
-    redmine_server_name: "redmine.example.com"
-    redmine_db:
-      adapter: "mysql2"
-      host: "{{ groups['galera_all'][0] }}"
-      database: "redmine"
-      username: "redmine"
-      password: "{{ redmine_db_password }}"
-    redmine_ssl: true
-    # Option 1: Let's Encrypt / Certbot
-    # redmine_ssl_letsencrypt_enable: true
-    # redmine_ssl_letsencrypt_email: "admin@example.com"
-    # redmine_ssl_letsencrypt_domains:
-    #   - "redmine.example.com"
-    # Option 2: User-supplied TLS certificates
-    # redmine_user_ssl_cert: "{{ playbook_dir }}/files/ssl/redmine.crt"
-    # redmine_user_ssl_key: "{{ playbook_dir }}/files/ssl/redmine.key"
-    # redmine_user_ssl_ca_cert: "{{ playbook_dir }}/files/ssl/ca.crt"
-    redmine_plugins:
-      - name: redmine_code_review
-        url: https://github.com/haru/redmine_code_review/releases/download/1.2.2/redmine_code_review-1.2.2.zip
-        version: "1.2.2"
-      # - name: my_custom_plugin
-      #   src: "{{ playbook_dir }}/files/my_custom_plugin/"
-      # - name: another_plugin
-      #   repo: https://github.com/example/another_plugin.git
-      #   version: "main"
   roles:
     - role: adriacloud.redmine

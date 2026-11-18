@@ -88,7 +88,6 @@ _redmine_db_defaults:
   port: 3306
   database: "{{ redmine_db.get('name', 'redmine') }}"
   username: redmine
-  password: "changeme"
   encoding: "{{ (redmine_db.get('adapter', 'mysql2') in ['mysql2', 'trilogy']) | ternary('utf8mb4', 'utf8') }}"
   variables: {}
 _redmine_db: "{{ _redmine_db_defaults | combine(redmine_db, recursive=True) }}"
