@@ -93,6 +93,7 @@ _redmine_service_env: >-
     {
       'RAILS_ENV': redmine_rails_env,
       'RAILS_SERVE_STATIC_FILES': 'true',
+      'RAILS_LOG_TO_STDOUT': 'true',
       'PATH': _redmine_ruby_runtime_bin_dir ~ ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     } | combine(redmine_extra_env)
   }}
