@@ -96,7 +96,7 @@ redmine_language: en
 # redmine_smtp_settings:
 #   address: localhost
 #   port: 25
-#   authentication: plain
+#   authentication: :plain
 #   domain: "{{ redmine_server_name }}"
 #   user_name: ""
 #   password: ""

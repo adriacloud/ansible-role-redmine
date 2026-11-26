@@ -102,7 +102,7 @@ _redmine_smtp_configuration: >-
       {
         'default': {
           'email_delivery': {
-            'delivery_method': 'smtp',
+            'delivery_method': ':smtp',
             'smtp_settings': redmine_smtp_settings
           }
         }
