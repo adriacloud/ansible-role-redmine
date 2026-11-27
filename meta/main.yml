@@ -1,7 +1,9 @@
 ---
 galaxy_info:
   author: Adria Cloud Services
-  description: Installation and configuration of Redmine
+  description: >-
+    Complete installation, configuration and upgrade of Redmine
+    on Ubuntu, Debian and EL.
   license: Apache-2.0
   role_name: redmine
   namespace: adriacloud
